@@ -67,10 +67,14 @@ until it lands.
 - **End-to-end call sequence driven from Python with synthetic geometry**: the
   car spawns at the requested transform, accelerates under throttle, and writes
   a well-formed state record every frame
+- **Real collision geometry recovered and checksum-verified** — 185/186 track
+  parts plus the car hull, bit-identical to the game (`geometry.npz`, 0.77 MB)
 
 **Not started:**
 
-- Real track-part geometry, `WasmPhysics`, save/restore, ghost verification
+- Track-code decoding, `WasmPhysics`, save/restore, ghost verification
+
+Everything the physics module needs is now in hand except the decoded track.
 
 ### Do not extract this by memory diffing
 
