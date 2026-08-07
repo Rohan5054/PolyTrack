@@ -204,6 +204,33 @@ class TrackCode:
             )
         )
 
+    def ordered_parts(self) -> tuple[Part, ...]:
+        """Parts in the order the client's ``TrackData.forEachPart`` yields them.
+
+        The client does not keep parts in the order they were added. ``addPart``
+        binary-inserts each one into a per-id list sorted on
+        ``(x, y, z, rotation, rotationAxis, color, checkpointOrder, startOrder)``,
+        and keeps the id list itself sorted ascending -- so iteration is fully
+        canonical regardless of how the track was built.
+
+        A code round-tripped through the client is therefore already in this
+        order, and for every shipped track this sort is a no-op. It is applied
+        anyway: the procedural generator will construct tracks in whatever order
+        is convenient, and a physics engine is entitled to depend on the order
+        its geometry arrives in.
+        """
+        return tuple(
+            sorted(
+                self.parts,
+                key=lambda p: (
+                    p.part_id, p.x, p.y, p.z, p.rotation, p.rotation_axis,
+                    p.color,
+                    -1 if p.checkpoint_order is None else p.checkpoint_order,
+                    -1 if p.start_order is None else p.start_order,
+                ),
+            )
+        )
+
     def physics_buffer(self) -> bytes:
         """Pack the parts exactly as ``createCarModel`` expects them.
 
@@ -212,12 +239,10 @@ class TrackCode:
             u8 partId  i32 x  i32 y  i32 z  u8 rotation  u8 rotationAxis
             i32 checkpointOrder   (-1 when the part is not a checkpoint)
 
-        Order matters: the client walks its parts in storage order and the
-        checkpoint indices reported back by the simulation refer to positions
-        in this buffer.
+        Emitted in :meth:`ordered_parts` order, which is the client's.
         """
         out = bytearray()
-        for part in self.parts:
+        for part in self.ordered_parts():
             out.append(part.part_id & 0xFF)
             out += part.x.to_bytes(4, "little", signed=True)
             out += part.y.to_bytes(4, "little", signed=True)

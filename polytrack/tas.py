@@ -18,7 +18,11 @@ PolyTrack TAS community already uses, it round-trips through their
 plain text so a desync can be diffed by eye. Every component here -- the
 environment, the search layer, the verifier -- speaks this format.
 
-Frames are physics frames at 60 Hz, matching the game's own recording format.
+Frames are physics frames, matching the game's own recording format -- which
+means **milliseconds**. PolyTrack steps its physics at 1000 Hz, not 60; see
+``polytrack.physics.wasm`` for the evidence. A ``.tas`` line per frame is
+therefore a line per millisecond, which is why the format is written and read
+as runs of held inputs rather than one row per tick.
 """
 
 from __future__ import annotations

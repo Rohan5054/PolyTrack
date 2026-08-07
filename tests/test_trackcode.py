@@ -188,6 +188,11 @@ def test_every_shipped_track_decodes():
         assert len(track.starts) >= 1, path
         orders = [p.start_order for p in track.starts]
         assert orders == sorted(orders) and len(set(orders)) == len(orders), path
+        # The client stores parts sorted and writes them out in that order, so a
+        # correctly decoded code arrives already canonical. This is a sharp
+        # alignment check: a decoder off by a field would produce coordinates
+        # that no longer sort the way they were written.
+        assert track.parts == track.ordered_parts(), path
         current += 1
     assert current > 0, "no current-format tracks found"
     print(f"        ({current} PolyTrack2 decoded, {legacy} legacy skipped)")

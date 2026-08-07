@@ -135,10 +135,17 @@ tests/test_core.py
 
 ### Design decisions worth knowing
 
-**Frame-indexed, never time-indexed.** Everything counts physics frames at 60 Hz.
-Wall-clock never enters the simulation. This is what makes runs reproducible and
-what made Polybot's screen-scraping approach fail — it fought display refresh
-rate and accumulated 2–3 ms of error per event.
+**Frame-indexed, never time-indexed.** Everything counts physics frames, and a
+PolyTrack frame is **one millisecond** — the physics runs at 1000 Hz, not the
+60 Hz this project assumed until the real backend was built. Wall-clock never
+enters the simulation. This is what makes runs reproducible and what made
+Polybot's screen-scraping approach fail — it fought display refresh rate and
+accumulated 2–3 ms of error per event.
+
+Because 1000 decisions a second is not an action space, an agent holds one
+action across a control interval (`WasmPhysics.step_many`). The game does the
+same thing: recordings store input *changes*, so a held key spans hundreds of
+ticks.
 
 **`.tas` is the interchange format.** The environment, the search layer and the
 verifier all speak it. It round-trips into a ghost the real game can replay,

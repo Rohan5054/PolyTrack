@@ -71,7 +71,10 @@ class PolyTrackEnv(gym.Env):
         backend: PhysicsBackend | None = None,
         obs_config: ObservationConfig | None = None,
         reward_config: RewardConfig | None = None,
-        max_frames: int = 3600,  # 60 s at 60 Hz
+        # Frames of whatever backend is attached. The stand-in runs at 60 Hz, so
+        # this is a minute of it; the real module runs at 1000 Hz and will want
+        # a control interval rather than a raw frame budget. See CLAUDE.md.
+        max_frames: int = 3600,
     ) -> None:
         super().__init__()
         self.track = track or straight_track()

@@ -30,38 +30,62 @@ pip install -e .
 python tests/test_core.py       # 24 tests
 python tests/test_search.py     #  9 tests
 python tests/test_trackcode.py  #  7 tests
+python tests/test_wasm.py       # 17 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 40 pass. `test_trackcode.py` also decodes every `.track` the game ships if
-you point it at them: `POLYTRACK_TRACKS=path\to\tracks python tests/test_trackcode.py`.
+All 57 pass. Two of the suites reach for the game's own files and are stronger
+when they find them:
+
+* `test_trackcode.py` decodes every `.track` the game ships —
+  `POLYTRACK_TRACKS=path\to\tracks python tests/test_trackcode.py`.
+* `test_wasm.py` drives the real physics module when `polytrack_physics.wasm`
+  and `geometry.npz` are in the repo root (or `POLYTRACK_WASM` /
+  `POLYTRACK_GEOMETRY` point at them). Neither file is committed — both are
+  derived from Kodub's game. Without them those tests skip and say so, which
+  means a green run does not by itself prove the backend was exercised.
 
 ## The one thing blocking everything
 
 **`ReferencePhysics` is not PolyTrack.** It is a bicycle model that exists so the
-stack could be built and tested. Every time this repo produces is meaningless.
-Do not tune reward coefficients against it beyond checking that learning occurs.
+stack could be built and tested. Every time it produces is meaningless. Do not
+tune reward coefficients against it beyond checking that learning occurs.
 
-The project becomes real when a physics backend is built against PolyTrack's
-actual WebAssembly module and verified. **This could not be done in the chat
-sandbox because its network allowlist blocks `kodub.com`.** On a local machine
-it is straightforward. That is the main reason this work moved to Claude Code.
+`WasmPhysics` now drives the real module and everything below the acceptance
+gate works: the car spawns where the client would put it, drives, collides,
+saves and restores, and two fresh instances agree byte for byte. **What is still
+unproven is whether it matches the actual game.** Until the gate below passes,
+treat every number from it as provisional too.
 
-Full procedure and the verified C API are in `PROJECT_STATUS.md` §3. Summary:
+How the backend was built, and how to rebuild the inputs it needs:
 
 1. Get the module from a build you own. Keep it local; do not redistribute it.
+   Neither `polytrack_physics.wasm` nor `geometry.npz` is committed.
 2. **Read the glue before probing anything.** `app.asar` ships
    `lib/polytrack_physics.js` (exact export/import mapping),
    `simulation_worker.bundle.js` (the call sequence and the game's own replay
-   verifier) and `main.bundle.js` (track-code decoder and the `CarState`
-   serialiser). Everything the module needs is described there in plain JS.
+   verifier) and `main.bundle.js` (track-code decoder, the `CarState`
+   serialiser, the part table, the start transform and the terrain generator).
+   Everything the module needs is described there in plain JS.
 3. Host it from **Python via `wasmtime`**. All nine imports are ordinary
    Emscripten hooks; only `emscripten_resize_heap` needs a real implementation.
    No Node process, no IPC.
 4. The one thing not in the JS is the collision geometry, which comes from
-   Draco-compressed `.glb` models. Dump it once from a running game rather than
-   reimplementing the decode.
+   Draco-compressed `.glb` models. `tools/extract_geometry.mjs` replays the
+   game's model pipeline in real three.js and checks every part against the
+   SHA-256 the game carries for it; `tools/build_geometry.py` packs the result.
+
+Two performance notes, both learned the hard way:
+
+* **Call `wasmtime` exports through the raw C API on the hot path.** The Python
+  wrapper boxes every argument: ~100 µs for a seven-argument call against ~4 µs
+  unchecked. At 1000 ticks per simulated second that was most of the budget.
+  `WasmModule.bind` does this; use it rather than `call` in a loop.
+* **The module costs ~650–800 µs per 1 ms tick**, nearly independent of track
+  size, so it is the module's own fixed work and not something in this repo.
+  That is roughly 1× realtime, which makes parallel collectors mandatory rather
+  than an optimisation.
 
 Do **not** try to locate state by stepping and diffing memory. That was the
 original plan and it produced confident nonsense — a determinism PASS on a call
@@ -96,7 +120,9 @@ polytrack/
   physics/
     base.py       PhysicsBackend protocol + CarState   <- the seam
     reference.py  deterministic stand-in (NOT PolyTrack)
-    wasm.py       skeleton for the real backend
+    assets.py     geometry.npz: per-part collision meshes, car hull, massOffset
+    world.py      start transform, mountain terrain, three.js quaternion maths
+    wasm.py       the real backend: wasmtime host + state record + save/restore
 ```
 
 `PhysicsBackend` is the seam. Everything above it is written against the
@@ -125,10 +151,30 @@ stretch of track and farms reward forever.
 reproduced from the reported inputs is worthless. Tested at every layer, and it
 is the same check to run against the real game.
 
-**Everything is frame-indexed at 60 Hz, never time-indexed.** Wall-clock never
-enters the simulation. This is what makes runs reproducible — and what made the
-existing `Polybot` project fail, since it fought display refresh rate and
-accumulated 2–3 ms of error per event.
+**Everything is frame-indexed, never time-indexed.** Wall-clock never enters the
+simulation. This is what makes runs reproducible — and what made the existing
+`Polybot` project fail, since it fought display refresh rate and accumulated
+2–3 ms of error per event.
+
+**A frame is one millisecond. The physics runs at 1000 Hz, not 60.** This was
+wrong everywhere in this repo until the backend landed, and it is the kind of
+error that makes every number plausible and every number wrong. Three
+independent confirmations, all in the shipped client:
+
+* `simulation_worker.bundle.js` drains its accumulator in `o -= .001` steps, one
+  `updateCarModel` per step;
+* `maxFrames = 5999999`, which is 99:59.999 counted in milliseconds;
+* `formatTimeString` renders `numberOfFrames` by dividing by 60000 and 1000.
+
+So `frames` in the state record, in recordings, and in every published PolyTrack
+time is a count of milliseconds. The community's 0.5.2 API notes claim 60 Hz and
+quote `maxFrames = 5,999,999` in the same sentence; those two cannot both be
+true, and the second one is.
+
+The consequence: 1000 decisions a second is not an action space. The game
+records inputs as *changes*, so a held key spans hundreds of ticks. Agents hold
+one action across a control interval — `WasmPhysics.step_many(mask, ticks)` —
+which is both the right semantics and much faster than ticking from Python.
 
 **Projection is windowed.** Without it, step cost grows with track length, so a
 2 km community track would run slower than a 200 m one for no reason.

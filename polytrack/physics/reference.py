@@ -28,7 +28,10 @@ from ..actions import DOWN, LEFT, RIGHT, UP
 from ..track import ProgressTracker, Track
 from .base import CarState, StepResult
 
-DT = 1.0 / 60.0  # fixed physics step, matching the game's 60 Hz
+# Fixed physics step. Deliberately *not* PolyTrack's, which is 1 ms: this model
+# is not PolyTrack either, and a 60 Hz stand-in keeps its episodes a sane length
+# for testing the layers above. Nothing may infer the real rate from here.
+DT = 1.0 / 60.0
 
 
 class ReferencePhysics:

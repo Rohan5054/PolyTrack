@@ -1,6 +1,6 @@
 # PolyTrack AI Agent — Project Status & Roadmap
 
-**Last updated:** 7 August 2026
+**Last updated:** 8 August 2026
 **Repo:** `C:\Users\Rohan\Polytrack\polytrack-agent`
 
 ---
@@ -44,15 +44,15 @@ never was for Trackmania, where every project fought a closed real-time engine.
 
 ## 3. Where We Are Right Now
 
-### Stage 0 — Physics Backend · **API fully mapped, backend not yet written**
+### Stage 0 — Physics Backend · **backend running; the gate is the last step**
 
 This is the only stage that matters right now. Everything else is scaffolding
 until it lands.
 
 **Done:**
 
-- Full stack built and tested against a stand-in simulator — **31 tests passing**
-  (22 core + 9 search)
+- Full stack built and tested — **57 tests passing** (24 core + 9 search +
+  7 trackcode + 17 wasm)
 - Discrete action space, `.tas` format, track geometry, Sophy-style observations,
   reward function, Gymnasium environment
 - Search layer: `BeamSearch`, `CEMSearch`, `RefinementSearch`
@@ -72,12 +72,22 @@ until it lands.
 
 - **Track codes decode** — `PolyTrack2` → placed parts → the packed buffer
   `createCarModel` takes. All 17 official tracks and 14 community ones
+- **`WasmPhysics` drives the real module.** Registers all 186 part
+  configurations and the car hull, generates the client's mountain terrain,
+  spawns at the client's start transform, and steps. On Summer 1 the car
+  accelerates from the start line under throttle with all four wheels in
+  contact, reaching 78 km/h in three seconds
+- **The module's own `testDeterminism` returns true**, and two fresh instances
+  fed identical inputs produce byte-identical state records
+- **Save/restore round-trips exactly** — a 60-step tail replayed after restoring
+  a snapshot matches the original record for record
 
 **Not started:**
 
-- `WasmPhysics`, save/restore, ghost verification
+- ⛔ **The gate**: replaying a known recording and reproducing its finish frame
 
-Every input the physics module needs is now in hand. What remains is wiring.
+Everything below the gate now works. What is untested is whether it matches the
+real game — which is exactly what the gate is for.
 
 ### Do not extract this by memory diffing
 
@@ -113,8 +123,8 @@ Export letters come straight from `lib/polytrack_physics.js`:
 | `t` | `_emscripten_timeout` | `(i32, f64)` — timer callback, never fires for us |
 | `u`/`v`/`w` | `stackRestore` / `stackAlloc` / `stackSave` | |
 
-**There is no `dt` argument.** The timestep is fixed inside the module, which
-confirms the 60 Hz frame-indexing invariant at the source.
+**There is no `dt` argument.** The timestep is fixed inside the module — and it
+is **one millisecond, not one 60th of a second**. See §7.
 
 **Imports** `a.a`–`a.i` are ordinary Emscripten runtime hooks:
 `a` `__cxa_throw`, `b` `exit`, `c` keepalive-clear, `d` `setTimeout`,
@@ -195,12 +205,28 @@ Only `speedKmh` and the orientation quaternion. `CarState` in
    7754) and a different part record — so it is a separate port, not a flag.
    It costs nothing for the gate, since the official campaign is entirely
    `PolyTrack2`, but it does shrink the Stage 2 training corpus.
-3. **Write `WasmPhysics`.** Replace `WasmLayout` (offset-based, wrong model)
-   with the call sequence and record parser above.
-4. **Implement save/restore.** The module exposes no save-state call, so this is
-   a snapshot of linear memory. Start with the whole heap — correct-but-slow
-   beats fast-but-lossy, because a lossy save desyncs only under search — then
-   measure, because 16.9 MB per search node will dominate beam search.
+3. ~~**Write `WasmPhysics`.**~~ **Done** — `polytrack/physics/wasm.py`, plus
+   `assets.py` (the geometry pack) and `world.py` (start transform, mountain
+   terrain, quaternion arithmetic transcribed from the bundled three.js).
+   `WasmLayout` is gone; it modelled the module as fixed memory offsets, which
+   was never how it worked.
+
+   Two things the module does not provide, and the calls made:
+
+   - **No velocity or angular velocity** — only `speedKmh` and a quaternion.
+     Both vectors are finite-differenced in the backend. They are
+     observation-only and never feed back into the simulation, so they cannot
+     affect a replay, and doing it here keeps everything above the
+     `PhysicsBackend` seam unchanged. Cross-checked against the module's own
+     `speedKmh`: the two agree. The raw record travels in `StepResult.info`.
+   - **`reset()` is delete-then-create**, not the module's `reset` control bit.
+     That bit is the in-game respawn key: it returns the car to its last
+     checkpoint and leaves the clock running.
+4. ~~**Implement save/restore.**~~ **Done**, and deliberately unoptimised: the
+   whole of linear memory plus the stack pointer, ~24 MB a call. A 60-step tail
+   replayed after a restore matches the original record for record. This will
+   dominate beam search and is meant to be narrowed — but only after the gate
+   passes, since a lossy save desyncs *only* under search.
 5. **⛔ THE GATE — replay a known recording and reproduce its finish frame
    exactly.** The game already implements this check: `simulation_worker`'s
    `Verify` path steps a recording to `targetFrames` and asserts
@@ -261,7 +287,7 @@ Service (added in v0.6.0) before submitting anything.
 | `probe_wasm.py` | Instantiate with logging stubs; see which imports fire |
 | `map_wasm.py` | Call exports, diff memory ⚠️ *no instance isolation — results after a stack-modifying call are unreliable* |
 | `step_probe.py` | ⚠️ **Superseded and misleading.** Its determinism check passes on a no-op call sequence, and its "smoothest offsets" are integer counters read as denormal floats. The glue JS supersedes all of it. |
-| `api_probe.py` | Drives the verified call sequence with synthetic geometry and parses the state record — the reference for how to talk to the module |
+| `api_probe.py` | Drove the call sequence with synthetic geometry to confirm the export mapping. Superseded by `polytrack/physics/wasm.py`, which is now the reference |
 | `extract_geometry.mjs` | Node + three.js. Replays the game's model pipeline to recover every part's collision mesh, checked against the game's own SHA-256s |
 | `build_geometry.py` | Packs that JSON into `geometry.npz` (0.77 MB) for the backend |
 
@@ -281,8 +307,18 @@ Each has a test. Each was a real bug found the hard way.
   one stretch and farms reward forever.
 - **Search output must replay identically.** A time that can't be reproduced from
   its own inputs is fiction.
-- **Everything is frame-indexed at 60 Hz, never time-indexed.** Wall-clock never
-  enters the simulation. Confirmed at the source: `updateCarModel` takes no `dt`.
+- **Everything is frame-indexed, never time-indexed.** Wall-clock never enters
+  the simulation. Confirmed at the source: `updateCarModel` takes no `dt`.
+- **A frame is one millisecond — the physics runs at 1000 Hz, not 60.** This
+  document and the whole repo said 60 Hz until the backend was written. Three
+  independent confirmations in the shipped client: the worker drains its
+  accumulator in `o -= .001` steps, one `updateCarModel` per step; `maxFrames`
+  is 5999999, which is 99:59.999 in milliseconds; and `formatTimeString`
+  divides `numberOfFrames` by 60000 and 1000. The community's 0.5.2 API notes
+  assert 60 Hz and quote that same `maxFrames` one clause later — the two are
+  not compatible, and the frame count is the one that checks out.
+  It follows that an agent must hold an action across a control interval rather
+  than choose 1000 times a second; `WasmPhysics.step_many` exists for that.
 - ~~Run the WASM single-threaded.~~ Resolved, not a risk: the module imports no
   pthread hooks and uses unshared memory. PolyTrack's multithreading is at the
   *JS* level — one worker per car — so a Python host gets a single-threaded
@@ -299,9 +335,10 @@ Each has a test. Each was a real bug found the hard way.
 | Risk | Impact | Mitigation |
 |---|---|---|
 | ~~Collision vertices differ from the game's~~ | Was: silent desync deep into a replay | **Closed.** 185/186 parts and the car hull verified bit-identical against the game's own checksums. `StraightTilted` still open |
-| `CarState` declares `velocity` / `angular_velocity`, which the module does not expose | `observation.py` reads fields with no source | Decide: finite-difference position & quaternion, or drop them for `speedKmh` + quaternion + a short frame history |
-| Save/restore misses hidden state | Silent desyncs under search only | Snapshot generously; narrow later |
-| Whole-heap snapshots are 16.9 MB | Search throughput, not correctness | Measure before building the refiner; narrow the ranges if it bites |
+| ~~`CarState` declares `velocity` / `angular_velocity`, which the module does not expose~~ | Was: fields with no source | **Closed.** Finite-differenced in the backend; agrees with the module's `speedKmh`. Observation-only, so it cannot affect a replay |
+| ~~Save/restore misses hidden state~~ | Was: silent desyncs under search only | **Closed for now.** Whole-heap snapshot; a long tail replays identically after restore. Reopens the moment the ranges are narrowed |
+| **Simulation runs at roughly 1× realtime** | Training throughput. This is the big one | ~650–800 µs per 1 ms tick measured (sustained ~2.3 ms under thermal throttling on this laptop). Cost is nearly flat in track size, so it is the module's own fixed work, not our geometry. Python overhead is already down to ~0 via the raw wasmtime call path — the remaining cost is inside the module. Mitigation is parallel collectors, which the Linesight architecture already assumes; measure again on a desktop before drawing conclusions |
+| Whole-heap snapshots are ~24 MB | Search throughput, not correctness | Measure before building the refiner; narrow the ranges if it bites |
 | `Date.now()` is read once during `__wasm_call_ctors` | If it seeds anything the physics touches, no host can ever match the game | Cheap to disprove: the gate catches it immediately |
 | Reward coefficients are untuned placeholders | Training won't converge | Re-tune once real physics lands |
 | Physics changed across versions | Times not comparable | **Pinned to 0.6.2** — the worker throws on any other version string |
@@ -313,7 +350,9 @@ Each has a test. Each was a real bug found the hard way.
 
 - **Machine:** Windows, Python 3.14, VS Code + Claude Code extension
 - **Install:** `pip install -e .` (no `PYTHONPATH` needed)
-- **Tests:** `python tests\test_core.py` → 22/22 · `python tests\test_search.py` → 9/9
+- **Tests:** 57 passing — `test_core.py` 24 · `test_search.py` 9 · `test_trackcode.py` 7 · `test_wasm.py` 17. The last two read the game's own
+  files when `POLYTRACK_TRACKS` / `geometry.npz` / `polytrack_physics.wasm`
+  are present, and skip cleanly when they are not
 - **Game:** PolyTrack desktop (Electron), extracted to `~\Polytrack\game`
 - **Version pinned: `0.6.2`.** The simulation worker throws on any mismatch, and
   replays are version-sensitive. Record it alongside every measured time.
