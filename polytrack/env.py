@@ -97,9 +97,10 @@ class PolyTrackEnv(gym.Env):
         super().reset(seed=seed)
         state = self.backend.reset()
         self._progress.reset()
-        self._previous_arc, _ = self._progress.update(state.position)
+        arc, lateral_offset = self._progress.update(state.position)
+        self._previous_arc = arc
         self._input_log = []
-        return self.observer.build(state), {"frame": 0}
+        return self.observer.build(state, arc, lateral_offset), {"frame": 0}
 
     def step(
         self, action: int
@@ -152,7 +153,8 @@ class PolyTrackEnv(gym.Env):
             if result.finished:
                 info["time"] = format_time(state.frame)
 
-        return self.observer.build(state), float(reward), terminated, truncated, info
+        observation = self.observer.build(state, arc, lateral_offset)
+        return observation, float(reward), terminated, truncated, info
 
     # -- TAS interop ------------------------------------------------------
 

@@ -89,9 +89,30 @@ class ObservationBuilder:
             + self.config.n_rays  # corridor rays
         )
 
-    def build(self, state: CarState) -> np.ndarray:
+    def build(
+        self, state: CarState, arc: float, lateral_offset: float
+    ) -> np.ndarray:
+        """Build the observation vector for one frame.
+
+        Args:
+            state: Car state from the physics backend.
+            arc: How far along the centerline the car is, **from the caller's
+                :class:`~polytrack.track.ProgressTracker`**.
+            lateral_offset: Distance from the centerline, from the same source.
+
+        ``arc`` is a required argument rather than something computed here, and
+        that is deliberate. This builder used to call ``track.project(position)``
+        with no window, which is the globally-nearest-point projection the rest
+        of the codebase exists to avoid: on any track that passes near itself it
+        silently reports the wrong part of the track, and it costs O(track
+        length) per frame on top. Worse, the environment already holds a correct
+        stateful arc, so the observation and the reward were reading progress
+        from two different and occasionally disagreeing sources.
+
+        There is no default. Progress is genuinely not a function of position
+        alone, so there is no safe value to fall back to.
+        """
         cfg = self.config
-        arc, lateral_offset = self.track.project(state.position)
 
         scale = cfg.reference_speed if cfg.include_speed_scaling else 1.0
         local_velocity = state.local_velocity() / scale

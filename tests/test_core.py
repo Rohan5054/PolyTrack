@@ -21,7 +21,8 @@ from polytrack.actions import (
     mask_to_keys,
 )
 from polytrack.env import PolyTrackEnv
-from polytrack.physics.base import PhysicsBackend
+from polytrack.observation import ObservationBuilder
+from polytrack.physics.base import CarState, PhysicsBackend
 from polytrack.physics.reference import ReferencePhysics
 from polytrack.tas import TAS, InputChange, format_time
 from polytrack.track import chicane_track, oval_track, straight_track
@@ -255,6 +256,60 @@ def test_env_exports_replayable_tas():
     replay_env = PolyTrackEnv(track=chicane_track())
     outcome = replay_env.replay_tas(tas)
     assert outcome["frames"] == len(env._input_log)
+
+
+def _resting_state(position, forward=(0.0, 1.0, 0.0)):
+    return CarState(
+        frame=0,
+        position=np.asarray(position, dtype=np.float64),
+        velocity=np.zeros(3),
+        forward=np.asarray(forward, dtype=np.float64),
+        up=np.array([0.0, 0.0, 1.0]),
+        angular_velocity=np.zeros(3),
+        wheel_contact=np.ones(4, dtype=bool),
+        checkpoint=0,
+        finished=False,
+    )
+
+
+def test_observation_uses_the_arc_it_is_given_not_the_nearest_point():
+    """The observation must not re-derive progress from position alone.
+
+    On the oval the start and finish are the same point in space, so a single
+    position is consistent with arc 0 and with arc == length. The builder used
+    to resolve that by calling ``track.project`` unwindowed, which picks
+    whichever is nearest and therefore disagrees with the environment's own
+    tracker exactly where it matters. Feeding the same state with two different
+    arcs must produce two different observations -- if it does not, the arc
+    argument is being ignored.
+    """
+    track = oval_track()
+    builder = ObservationBuilder(track)
+    state = _resting_state(track.centerline[0] - np.array([0.0, 0.01, 0.0]))
+
+    at_start = builder.build(state, 0.0, 0.0)
+    at_finish = builder.build(state, track.length, 0.0)
+    assert not np.allclose(at_start, at_finish)
+
+
+def test_observation_and_reward_read_progress_from_the_same_source():
+    """The lateral offset in the observation is the tracker's, not a re-projection."""
+    env = PolyTrackEnv(track=oval_track())
+    env.reset()
+    observation = None
+    info = {}
+    for _ in range(120):
+        observation, _, terminated, truncated, info = env.step(
+            mask_to_action(UP | LEFT)
+        )
+        if terminated or truncated:
+            break
+
+    # Layout: 3 local velocity + 1 speed + 3 angular velocity + 1 airborne
+    # + 4 wheel contact, then the lateral offset.
+    lateral_index = 3 + 1 + 3 + 1 + 4
+    expected = info["lateral_offset"] / env.track.width
+    assert observation[lateral_index] == np.float32(expected)
 
 
 def test_format_time_matches_game_style():
