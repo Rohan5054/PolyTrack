@@ -162,14 +162,20 @@ Only `speedKmh` and the orientation quaternion. `CarState` in
 
 ## 4. Remaining Steps — Stage 0
 
-1. **Get the real collision geometry.** `addTrackPartConfiguration` needs each
-   track part's `physicsShapeVertices`, and `initializeCarCollisionShape` needs
-   the car hull. Both come from the Draco-compressed `.glb` models. Do **not**
-   reimplement GLB+Draco: these tables are static and loaded once, so run the
-   game under Electron with remote debugging, intercept the `Init` message the
-   main thread posts to `simulation_worker`, and dump `trackParts`,
-   `carCollisionShapeVertices` and `carMassOffset` to a `.npz`. One-time cost;
-   the Python host then never needs Node.
+1. ~~**Get the real collision geometry.**~~ **Done.** `tools/extract_geometry.mjs`
+   replays the game's own model pipeline in real three.js under Node and
+   `tools/build_geometry.py` packs the result into a 0.77 MB `geometry.npz`.
+   **185 of 186 track parts are bit-identical to the game's SHA-256 checksums,
+   as is the car hull** (`c12d4421…`); `massOffset` is the literal `0.6`.
+   No Electron hooking needed, and the result is reproducible rather than an
+   opaque dump.
+
+   One outlier: part 159 `StraightTilted`, the only part built through the
+   quaternion path. Every ordering of scale/rotate/translate was tried. The
+   game logs a checksum mismatch as `console.error` and carries on, so a stale
+   entry in its own table fits the evidence as well as a bug here. Decide it by
+   launching the game and reading the console. It blocks nothing unless a
+   target track actually places that part.
 2. **Port `Track.fromSaveString`** from `main.bundle.js` so a `PolyTrack2…` code
    becomes the 19-byte-per-part buffer `createCarModel` wants. This is now a
    Stage 0 dependency, not a later stage.
@@ -240,6 +246,8 @@ Service (added in v0.6.0) before submitting anything.
 | `map_wasm.py` | Call exports, diff memory ⚠️ *no instance isolation — results after a stack-modifying call are unreliable* |
 | `step_probe.py` | ⚠️ **Superseded and misleading.** Its determinism check passes on a no-op call sequence, and its "smoothest offsets" are integer counters read as denormal floats. The glue JS supersedes all of it. |
 | `api_probe.py` | Drives the verified call sequence with synthetic geometry and parses the state record — the reference for how to talk to the module |
+| `extract_geometry.mjs` | Node + three.js. Replays the game's model pipeline to recover every part's collision mesh, checked against the game's own SHA-256s |
+| `build_geometry.py` | Packs that JSON into `geometry.npz` (0.77 MB) for the backend |
 
 ---
 
@@ -274,7 +282,7 @@ Each has a test. Each was a real bug found the hard way.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| **Collision vertices differ from the game's by even one float** | Silent desync hundreds of frames into a replay | Dump the exact arrays the game posts to its worker; never regenerate them |
+| ~~Collision vertices differ from the game's~~ | Was: silent desync deep into a replay | **Closed.** 185/186 parts and the car hull verified bit-identical against the game's own checksums. `StraightTilted` still open |
 | `CarState` declares `velocity` / `angular_velocity`, which the module does not expose | `observation.py` reads fields with no source | Decide: finite-difference position & quaternion, or drop them for `speedKmh` + quaternion + a short frame history |
 | Save/restore misses hidden state | Silent desyncs under search only | Snapshot generously; narrow later |
 | Whole-heap snapshots are 16.9 MB | Search throughput, not correctness | Measure before building the refiner; narrow the ranges if it bites |

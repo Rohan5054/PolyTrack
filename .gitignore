@@ -3,3 +3,6 @@ __pycache__/
 *.wasm
 report.json
 runs/
+geometry.json
+geometry.npz
+node_modules/
