@@ -70,11 +70,14 @@ until it lands.
 - **Real collision geometry recovered and checksum-verified** — 185/186 track
   parts plus the car hull, bit-identical to the game (`geometry.npz`, 0.77 MB)
 
+- **Track codes decode** — `PolyTrack2` → placed parts → the packed buffer
+  `createCarModel` takes. All 17 official tracks and 14 community ones
+
 **Not started:**
 
-- Track-code decoding, `WasmPhysics`, save/restore, ghost verification
+- `WasmPhysics`, save/restore, ghost verification
 
-Everything the physics module needs is now in hand except the decoded track.
+Every input the physics module needs is now in hand. What remains is wiring.
 
 ### Do not extract this by memory diffing
 
@@ -180,9 +183,18 @@ Only `speedKmh` and the orientation quaternion. `CarState` in
    entry in its own table fits the evidence as well as a bug here. Decide it by
    launching the game and reading the console. It blocks nothing unless a
    target track actually places that part.
-2. **Port `Track.fromSaveString`** from `main.bundle.js` so a `PolyTrack2…` code
-   becomes the 19-byte-per-part buffer `createCarModel` wants. This is now a
-   Stage 0 dependency, not a later stage.
+2. ~~**Port `Track.fromSaveString`.**~~ **Done** — `polytrack/trackcode.py`.
+   A `PolyTrack2…` code decodes to placed parts and to the 19-byte-per-part
+   buffer `createCarModel` wants. **All 31 current-format tracks shipped with
+   the game decode, including all 17 official ones**, each parsing to
+   completion with the name the client displays, up to a 45,455-part community
+   track.
+
+   Gap: the 47 shipped `PolyTrack1` community tracks. That is a genuinely
+   different pipeline — a different symbol codec (bundle module 6551, not
+   7754) and a different part record — so it is a separate port, not a flag.
+   It costs nothing for the gate, since the official campaign is entirely
+   `PolyTrack2`, but it does shrink the Stage 2 training corpus.
 3. **Write `WasmPhysics`.** Replace `WasmLayout` (offset-based, wrong model)
    with the call sequence and record parser above.
 4. **Implement save/restore.** The module exposes no save-state call, so this is

@@ -27,13 +27,15 @@ anything.
 
 ```bash
 pip install -e .
-PYTHONPATH=. python tests/test_core.py     # 22 tests
-PYTHONPATH=. python tests/test_search.py   #  9 tests
-PYTHONPATH=. python scripts/smoke_test.py
-PYTHONPATH=. python scripts/search_demo.py
+python tests/test_core.py       # 24 tests
+python tests/test_search.py     #  9 tests
+python tests/test_trackcode.py  #  7 tests
+python scripts/smoke_test.py
+python scripts/search_demo.py
 ```
 
-All 31 pass as of handoff.
+All 40 pass. `test_trackcode.py` also decodes every `.track` the game ships if
+you point it at them: `POLYTRACK_TRACKS=path\to\tracks python tests/test_trackcode.py`.
 
 ## The one thing blocking everything
 
@@ -86,6 +88,7 @@ track codes and times are all version-sensitive.
 polytrack/
   actions.py      9 discrete actions; opposing inputs cancel (per v0.6.0)
   tas.py          .tas read/write; carries explicit run length
+  trackcode.py    PolyTrack2 code -> placed parts -> physics buffer
   track.py        Track geometry + ProgressTracker
   observation.py  Sophy-style observation vector (62 floats)
   env.py          Gymnasium env; progress reward + time penalty
