@@ -46,28 +46,39 @@ actual WebAssembly module and verified. **This could not be done in the chat
 sandbox because its network allowlist blocks `kodub.com`.** On a local machine
 it is straightforward. That is the main reason this work moved to Claude Code.
 
-Full procedure in `README.md` under "Stage 0". Summary:
+Full procedure and the verified C API are in `PROJECT_STATUS.md` §3. Summary:
 
-1. Get the module from a build you own (itch.io desktop build is easiest to
-   inspect). Keep it local; do not redistribute it.
-2. `python tools/inspect_wasm.py path/to/physics.wasm --json report.json`
-3. **The import count decides the architecture.** Few imports → host from Python
-   via `wasmtime`. Many Emscripten imports → host in Node (which already has the
-   generated glue) and batch frames across the IPC boundary.
-4. Find state offsets by stepping, dumping memory, and diffing.
-5. Fill in `WasmLayout` in `polytrack/physics/wasm.py`.
+1. Get the module from a build you own. Keep it local; do not redistribute it.
+2. **Read the glue before probing anything.** `app.asar` ships
+   `lib/polytrack_physics.js` (exact export/import mapping),
+   `simulation_worker.bundle.js` (the call sequence and the game's own replay
+   verifier) and `main.bundle.js` (track-code decoder and the `CarState`
+   serialiser). Everything the module needs is described there in plain JS.
+3. Host it from **Python via `wasmtime`**. All nine imports are ordinary
+   Emscripten hooks; only `emscripten_resize_heap` needs a real implementation.
+   No Node process, no IPC.
+4. The one thing not in the JS is the collision geometry, which comes from
+   Draco-compressed `.glb` models. Dump it once from a running game rather than
+   reimplementing the decode.
+
+Do **not** try to locate state by stepping and diffing memory. That was the
+original plan and it produced confident nonsense — a determinism PASS on a call
+sequence that did nothing, and "car position" candidates that were integer
+counters reinterpreted as denormal floats. `tools/step_probe.py` is kept only as
+a record of that; do not trust its output.
 
 ### The acceptance gate
 
 > Replay a known TAS through the backend and reproduce its finish frame exactly.
 
-Not approximately. Ground truth: `beatrixwashere/polytracktas` ships TAS files
-and a `tas_to_ghost.py` encoder. The game enforces determinism itself — the
-client self-tests and refuses to submit runs that fail — so a backend that
-cannot reproduce a known ghost is simply wrong.
+Not approximately. The game already implements this exact check: the `Verify`
+path in `simulation_worker.bundle.js` steps a recording to `targetFrames` and
+asserts `hasFinished && frames == targetFrames`. Mirror it. The client also
+runs a determinism self-test and refuses to submit runs that fail it, so a
+backend that cannot reproduce a known ghost is simply wrong.
 
-Run the module **single-threaded**. PolyTrack's car simulation is multithreaded,
-and threading is the hardest case for deterministic replay.
+Pin game version **0.6.2** — the worker throws on a mismatch, and replays,
+track codes and times are all version-sensitive.
 
 ## Architecture
 
