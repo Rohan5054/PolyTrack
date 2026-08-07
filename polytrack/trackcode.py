@@ -15,12 +15,14 @@ variable-width bitstream that emits six bits per character normally and five
 when the low bits would overflow the alphabet -- see :func:`decode_symbols`.
 
 Bare save strings (no ``PolyTrack2`` prefix, no name/author header) use the
-same pipeline and are also accepted. Five older formats exist and are not
-supported; every current track, official or community, is ``PolyTrack2``.
+same pipeline and are also accepted. ``Track.fromSaveString`` tries five older
+formats after this one; they are not supported here. Every official track is
+``PolyTrack2``, as is every community track that has been re-saved since 0.6.0.
 """
 
 from __future__ import annotations
 
+import hashlib
 import zlib
 from dataclasses import dataclass
 from enum import IntEnum
@@ -180,9 +182,32 @@ class TrackCode:
     author: str | None = None
     #: Unix timestamp from the code's header, if it carried one.
     last_modified: int | None = None
+    #: The decoded byte stream from the environment byte onwards -- everything
+    #: an export string carries except its name/author header. Kept because it
+    #: is what the track's identity is computed from; see :attr:`track_id`.
+    payload: bytes = b""
 
     def __len__(self) -> int:
         return len(self.parts)
+
+    @property
+    def track_id(self) -> str:
+        """The track's identity, as the leaderboard knows it.
+
+        ``TrackData.getId`` is ``sha256`` of the serialised parts -- the same
+        bytes ``toSaveString`` deflates, and specifically *not* including the
+        name or author. Two tracks with different names but identical geometry
+        therefore share a leaderboard, which is presumably the point.
+
+        Taken from the decoded payload rather than by re-serialising, so it
+        needs no encoder and cannot disagree with what was actually read.
+        """
+        if not self.payload:
+            raise TrackCodeError(
+                "this TrackCode was constructed directly rather than decoded, "
+                "so it carries no payload to identify"
+            )
+        return hashlib.sha256(self.payload).hexdigest()
 
     @property
     def checkpoints(self) -> tuple[Part, ...]:
@@ -392,6 +417,9 @@ def decode(text: str) -> TrackCode:
     if has_header:
         name, author, last_modified = _read_header(reader)
 
+    # Everything from here on is the payload the track's id is taken from.
+    payload = reader.data[reader.offset :]
+
     environment = reader.u8()
     if environment not in tuple(Environment):
         raise TrackCodeError(f"unknown environment {environment}")
@@ -406,4 +434,5 @@ def decode(text: str) -> TrackCode:
         name=name,
         author=author,
         last_modified=last_modified,
+        payload=payload,
     )

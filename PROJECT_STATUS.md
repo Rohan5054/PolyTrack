@@ -51,8 +51,8 @@ until it lands.
 
 **Done:**
 
-- Full stack built and tested — **57 tests passing** (24 core + 9 search +
-  7 trackcode + 17 wasm)
+- Full stack built and tested — **71 tests passing** (24 core + 9 search +
+  7 trackcode + 17 wasm + 14 recording/gate)
 - Discrete action space, `.tas` format, track geometry, Sophy-style observations,
   reward function, Gymnasium environment
 - Search layer: `BeamSearch`, `CEMSearch`, `RefinementSearch`
@@ -82,9 +82,15 @@ until it lands.
 - **Save/restore round-trips exactly** — a 60-step tail replayed after restoring
   a snapshot matches the original record for record
 
-**Not started:**
+- **The gate harness is built and proven sharp** — `polytrack/recording.py`
+  (the input-recording codec), `polytrack/verify.py` (the game's own Verify
+  loop), `tools/extract_records.py` and `scripts/run_gate.py`. On a synthetic
+  sprint track the harness accepts the true finish frame and rejects it ±1 ms
 
-- ⛔ **The gate**: replaying a known recording and reproducing its finish frame
+**Blocked, and this is the only thing left in Stage 0:**
+
+- ⛔ **The gate has no oracle yet.** It needs one real run: an input recording
+  paired with the finish frame the game recorded for it. See §4.5.
 
 Everything below the gate now works. What is untested is whether it matches the
 real game — which is exactly what the gate is for.
@@ -200,11 +206,15 @@ Only `speedKmh` and the orientation quaternion. `CarState` in
    completion with the name the client displays, up to a 45,455-part community
    track.
 
-   Gap: the 47 shipped `PolyTrack1` community tracks. That is a genuinely
-   different pipeline — a different symbol codec (bundle module 6551, not
-   7754) and a different part record — so it is a separate port, not a flag.
-   It costs nothing for the gate, since the official campaign is entirely
+   Gap: the 47 shipped legacy community tracks. Those use one of the five
+   older formats `Track.fromSaveString` still accepts — a different symbol
+   codec and part record — so it is a separate port, not a flag. It costs
+   nothing for the gate, since the official campaign is entirely
    `PolyTrack2`, but it does shrink the Stage 2 training corpus.
+
+   Also here: `TrackCode.track_id`, the `sha256` the leaderboard keys on. It
+   is taken from the decoded payload rather than by re-serialising, so it
+   needs no encoder and cannot disagree with what was read.
 3. ~~**Write `WasmPhysics`.**~~ **Done** — `polytrack/physics/wasm.py`, plus
    `assets.py` (the geometry pack) and `world.py` (start transform, mountain
    terrain, quaternion arithmetic transcribed from the bundled three.js).
@@ -230,10 +240,47 @@ Only `speedKmh` and the orientation quaternion. `CarState` in
 5. **⛔ THE GATE — replay a known recording and reproduce its finish frame
    exactly.** The game already implements this check: `simulation_worker`'s
    `Verify` path steps a recording to `targetFrames` and asserts
-   `hasFinished && frames == targetFrames`. Mirror it. If this fails, everything
-   downstream is worthless.
+   `hasFinished && frames == targetFrames`. `polytrack/verify.py` mirrors it.
+   If this fails, everything downstream is worthless.
+
+   **Built. Waiting on an oracle — see §4.5.**
 6. **Swap the backend in.** One line — `PolyTrackEnv(backend=WasmPhysics(...))`.
    Nothing above the `PhysicsBackend` protocol changes.
+
+### 4.5 Getting an oracle for the gate
+
+The gate needs a pair: an input recording, and the exact frame the run finished
+on. A recording alone is not enough — it ends when the last key is released,
+which is not when the run ends.
+
+**The way that works: play one track.** On a personal best the client writes
+both to local storage:
+
+```
+polytrack_v5_prod_record_<slot>_default_<trackId>
+  -> {"uploadId":…, "tokenHash":…, "frames":…, "recording":"…"}
+```
+
+`frames` is the finish frame in milliseconds. So:
+
+```
+python tools/extract_records.py -o records.json
+POLYTRACK_TRACKS=path	o	racks python scripts/run_gate.py records.json
+```
+
+Any track, any time — a slow clean lap is a *better* first oracle than a fast
+one, since it spends longer in ordinary driving and less in edge cases.
+
+**Two other routes were tried and do not work:**
+
+| Route | Outcome |
+|---|---|
+| `GET vps.kodub.com/v6/leaderboard` — download a verified ghost | **403 Forbidden on every path, including `/`.** Kodub's server refuses this client outright. Not worked around, deliberately |
+| `beatrixwashere/polytracktas` — the community TAS repo | Holds exactly one TAS. Its `.ghost` is the **pre-0.6.0** encoding (a flat u24 frame list plus packed control nibbles, not the five toggle sequences 0.6.2 uses), and neither the repo nor the file records a finish frame. v0.6.0 rewrote the physics in C++, so those inputs would desync in the real game too. Confirmed by replaying it: the car leaves the track and ends 44 m below it |
+
+The TAS is still useful as a corroboration of the 1000 Hz finding — its input
+frames are 633, 1766, 4999, 14265, 14270, spaced in ways only milliseconds
+explain.
 
 ---
 

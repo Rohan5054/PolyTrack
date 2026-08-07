@@ -31,11 +31,12 @@ python tests/test_core.py       # 24 tests
 python tests/test_search.py     #  9 tests
 python tests/test_trackcode.py  #  7 tests
 python tests/test_wasm.py       # 17 tests
+python tests/test_recording.py  # 14 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 57 pass. Two of the suites reach for the game's own files and are stronger
+All 71 pass. Two of the suites reach for the game's own files and are stronger
 when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -95,13 +96,32 @@ a record of that; do not trust its output.
 
 ### The acceptance gate
 
-> Replay a known TAS through the backend and reproduce its finish frame exactly.
+> Replay a known recording through the backend and reproduce its finish frame
+> exactly.
 
-Not approximately. The game already implements this exact check: the `Verify`
-path in `simulation_worker.bundle.js` steps a recording to `targetFrames` and
-asserts `hasFinished && frames == targetFrames`. Mirror it. The client also
-runs a determinism self-test and refuses to submit runs that fail it, so a
-backend that cannot reproduce a known ghost is simply wrong.
+Not approximately. A simulator 0.01% off finishes a 40-second run four
+milliseconds early. The game implements this check itself — the `Verify` path in
+`simulation_worker.bundle.js` steps a recording to `targetFrames` and asserts
+`hasFinished && frames == targetFrames` — and `polytrack/verify.py` mirrors it.
+
+**The harness is built and tested; what it lacks is an oracle.** It needs a
+recording *paired with the finish frame the real game recorded for it*. A
+recording alone will not do: it ends when the last key is released, not when the
+run ends.
+
+Get one by playing a single track. On a personal best the client stores both in
+local storage under `polytrack_v5_prod_record_<slot>_default_<trackId>`:
+
+```bash
+python tools/extract_records.py -o records.json
+POLYTRACK_TRACKS=path/to/tracks python scripts/run_gate.py records.json
+```
+
+Any track, any time. Do not reach for the leaderboard API — `vps.kodub.com`
+returns 403 on every path for this client, and that is an answer, not an
+obstacle to route around. The community TAS repo does not work either: its one
+ghost is in the pre-0.6.0 encoding and carries no finish frame, and v0.6.0
+rewrote the physics, so those inputs desync in the real game too.
 
 Pin game version **0.6.2** — the worker throws on a mismatch, and replays,
 track codes and times are all version-sensitive.
@@ -117,6 +137,8 @@ polytrack/
   observation.py  Sophy-style observation vector (62 floats)
   env.py          Gymnasium env; progress reward + time penalty
   search.py       BeamSearch, CEMSearch, RefinementSearch
+  recording.py    ghost/replay codec: five toggle sequences, deflate, base64url
+  verify.py       the acceptance gate, mirroring the game's own Verify loop
   physics/
     base.py       PhysicsBackend protocol + CarState   <- the seam
     reference.py  deterministic stand-in (NOT PolyTrack)
