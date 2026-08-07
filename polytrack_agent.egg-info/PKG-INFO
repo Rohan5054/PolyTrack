@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: polytrack-agent
+Version: 0.1.0
+Summary: RL + trajectory-search agent for PolyTrack
+Requires-Python: >=3.11
+Requires-Dist: numpy>=1.26
+Requires-Dist: gymnasium>=1.0
+Requires-Dist: wasmtime>=20.0

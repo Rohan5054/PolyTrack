@@ -1,0 +1,9 @@
+[project]
+name = "polytrack-agent"
+version = "0.1.0"
+description = "RL + trajectory-search agent for PolyTrack"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "gymnasium>=1.0", "wasmtime>=20.0"]
+
+[tool.setuptools.packages.find]
+include = ["polytrack*"]
