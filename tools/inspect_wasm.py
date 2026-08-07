@@ -146,6 +146,17 @@ def report(info: dict) -> None:
                 marker = "  !!" if note.startswith("DETERMINISM") else "    "
                 print(f"    {marker} {note}")
         print()
+    else:
+        print("NOTE: no export name matched a known keyword. The module is")
+        print("      almost certainly minified, so names carry no meaning and")
+        print("      signatures are all you have. Use tools/probe_wasm.py to")
+        print("      identify functions by running them.\n")
+
+    print("ALL EXPORTS")
+    print("-" * 72)
+    for entry in info["exports"]:
+        print(f"  {entry['name']:<10} {entry['kind']:<14} {entry['signature']}")
+    print()
 
     memories = [e for e in info["exports"] if "Memory" in e["kind"]]
     if memories:
