@@ -26,19 +26,20 @@ anything.
 ## Run it
 
 ```bash
-pip install -e .
+pip install -e .[learning]      # torch is training-only; the rest runs without
 python tests/test_core.py       # 24 tests
 python tests/test_search.py     #  9 tests
 python tests/test_trackcode.py  #  7 tests
 python tests/test_wasm.py       # 17 tests
 python tests/test_recording.py  # 14 tests
-python tests/test_reference.py  # 14 tests
+python tests/test_reference.py  # 17 tests
+python tests/test_learning.py   # 14 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 85 pass. Three of the suites reach for the game's own files and are stronger
-when they find them:
+All 102 pass. Four of the suites reach for files that are not in the repo and
+are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
   `POLYTRACK_TRACKS=path\to\tracks python tests/test_trackcode.py`.
@@ -51,9 +52,38 @@ when they find them:
   reference line from a real run in `records.json` and a recording identifies
   its track only by id.
 
+* `test_learning.py` skips its torch half without torch. The replay and n-step
+  tests run regardless.
+
 `scripts/reference_demo.py` is the end-to-end demonstration: track code →
 collision meshes → module → replayed trajectory → reference line → observation →
 reward, on every record that matches an available track.
+
+## Training
+
+```bash
+POLYTRACK_TRACKS=path\to\tracks python scripts/build_library.py   # once, ~3 min
+python scripts/train.py --smoke                                   # 90 s, plumbing
+python scripts/train.py --workers 6
+```
+
+`tracks.npz` is the cache that makes collectors viable: deriving a reference line
+costs a full replay, so six workers rebuilding four lines each at launch would be
+eighteen minutes of nothing. Like `geometry.npz` it embeds the game's content and
+is gitignored.
+
+Throughput is the whole story. One collector yields **~11 transitions/second** at
+a 50 ms control interval, because the module runs at roughly half realtime and
+~700 µs of its 1 ms tick is its own internal work. Six collectors give 50–80/s
+aggregate. Budget hours for a first driving policy and days for anything that
+generalises — and note that a 62-float MLP is nowhere near the bottleneck, which
+is why CPU torch is the right build.
+
+Two things in `learning/collector.py` are load-bearing on Windows and all of them
+have cost time somewhere: processes start by **spawn** so nothing is inherited
+and `WasmPhysics` can never cross a process boundary; and torch grabs every core
+per process unless told otherwise, so `set_num_threads(1)` in a worker is not a
+tuning nicety but the difference between six workers and worse-than-one.
 
 ## The one thing blocking everything
 
@@ -158,7 +188,12 @@ polytrack/
   observation.py  Sophy-style observation vector (62 floats)
   env.py          Gymnasium env; progress reward + time penalty
   reference.py    replay -> trajectory -> reference line -> environment
+  library.py      tracks.npz: track code + reference line + par time, cached
   search.py       BeamSearch, CEMSearch, RefinementSearch
+  learning/
+    replay.py     sum-tree prioritised replay + n-step returns
+    iqn.py        the quantile critic, its loss, and the agent
+    collector.py  worker processes; one physics instance each
   recording.py    ghost/replay codec: five toggle sequences, deflate, base64url
   verify.py       the acceptance gate, mirroring the game's own Verify loop
   physics/
@@ -241,6 +276,22 @@ rates and a tunable control interval make "per frame" three different things.
 `test_reward_does_not_depend_on_how_finely_it_is_sliced` pins this: the same
 drive cut into twice as many decisions must pay exactly the same.
 
+**A failed episode must be cut, and the cut must not pay.** The real backend
+never reports `terminated` — the module has no notion of "off track", so without
+a stall cut a run that fails on the first corner still costs the whole time
+limit, which at ~0.5× realtime is a collector idling for a minute. But ending an
+episode also zeroes its future, so for a poor policy crashing becomes the
+cheapest way to stop the clock. The forfeit is therefore **proportional to the
+track not driven**, which makes both sides of that comparison scale identically
+with position: whether crashing pays stops depending on where the car is and
+becomes one question about pace. With the defaults the break-even is a third of
+the human's speed. `test_the_crash_exploit_does_not_depend_on_where_you_are`
+pins it.
+
+The stall cut also needs a grace period, or it kills the bootstrap: a car on the
+line has not moved yet, and an untrained policy cut at 3 m every episode never
+collects the throttle-then-move transitions that teach it the throttle.
+
 **A reference line is a route, not a centerline.** A track code says where every
 piece of road is and nothing about the order they are driven in, so
 `polytrack/reference.py` takes the route from a lap that was actually driven.
@@ -267,23 +318,30 @@ physics — `reference.env_from_recording(track, recording, frames)` returns a
 `PolyTrackEnv` driving PolyTrack's own module on a reference line derived from
 that run.
 
-1. **Tune `RewardConfig`** — the coefficients have never been calibrated,
-   because until now there was nothing honest to calibrate them against. Real
-   speeds are 200–330 km/h average and 480 km/h peak on the four tracks we have
-   lines for. Run a search against whatever you change; search is an adversarial
-   consumer of the reward and finds exploits in seconds.
+Done since: the track code decoder; the environment on real physics
+(`reference.env_from_recording`); reward coefficients rescaled to laps and par
+times; and the IQN training loop with parallel collectors.
+
+1. **Actually train something.** The loop runs and the plumbing is tested, but
+   **nothing has been trained past a 90-second smoke run.** For scale, trivial
+   policies reach 3–15% of a lap and random reaches 0.1%, so the reward
+   discriminates; whether it discriminates all the way to a finish is unknown.
+   Expect hours, and watch the `failures` histogram — all `off_line` means the
+   car cannot hold the track, all `stalled` means it cannot leave the line.
 2. **Procedural track generator** — the editor plus exportable codes gives an
    infinite training distribution. This is what buys generalisation, and no
    Trackmania project had it cheaply. It also retires the reference-line
    bootstrap: a generated track knows its own route, so it needs no lap driven
-   for it.
-3. **IQN training loop** — distributional Q-learning with PER and n-step,
-   multiple collectors feeding one learner (the Linesight architecture). Start
-   from CleanRL or Tianshou. Note the throughput figure above: collectors are
-   mandatory, not an optimisation.
-4. **Policy-guided search** — feed the trained policy in as an action prior so
+   for it. Until it exists, **four tracks is a memorisation problem, not a
+   generalisation one.**
+3. **Policy-guided search** — feed the trained policy in as an action prior so
    search only expands plausible actions. This is the hybrid the review
    recommended, and where record times come from.
+
+The biggest available speed-up is sample efficiency, not throughput: episodes
+re-drive the first half of the track constantly. Linesight starts episodes from
+points spread along the reference line, which needs `save_state` to be cheaper
+than a 24 MB heap pickle. Narrow it with the gate to check against.
 
 ## Known loose ends
 

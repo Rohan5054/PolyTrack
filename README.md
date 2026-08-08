@@ -20,23 +20,24 @@ last tenths.**
 | **Real WASM physics backend** | **Done. Acceptance gate passes, 8/8** |
 | Reference lines from real runs | Done |
 | Search layer (beam / CEM / refinement) | Done — validated on the stand-in |
+| IQN training loop | Done — **but nothing has been trained yet** |
 | Procedural track generator | Not started |
-| IQN training loop | Not started |
 | Policy-guided search | Not started |
 
-85 tests passing. Two suites reach for game files and are stronger when they find
-them; without those files they skip and say so.
+102 tests passing. Four suites reach for files not in the repo and are stronger
+when they find them; without them they skip and say so.
 
 ## Quick start
 
 ```bash
-pip install -e .
+pip install -e .[learning]      # torch is training-only
 python tests/test_core.py       # 24
 python tests/test_search.py     #  9
 python tests/test_trackcode.py  #  7
 python tests/test_wasm.py       # 17  (needs the game files)
 python tests/test_recording.py  # 14
-python tests/test_reference.py  # 14  (needs the game files)
+python tests/test_reference.py  # 17  (needs the game files)
+python tests/test_learning.py   # 14  (needs torch)
 python scripts/smoke_test.py
 ```
 
@@ -90,6 +91,30 @@ not a centerline, so "lateral offset" means distance from that lap. It stops
 being a constraint at the procedural generator, which knows each track's route by
 construction and needs no lap driven for it.
 
+## Training
+
+```bash
+POLYTRACK_TRACKS=path/to/tracks python scripts/build_library.py   # once, ~3 min
+python scripts/train.py --smoke                                   # 90 s
+python scripts/train.py --workers 6
+```
+
+IQN — distributional Q-learning — with prioritised replay, 5-step returns and
+several collector processes feeding one learner. That is Linesight's
+architecture, and here the parallelism is not an optimisation: the module runs at
+about half realtime per instance, so **one collector yields ~11 transitions a
+second** and six give 50–80.
+
+Distributional matters for racing specifically. Committing to a corner at speed
+either works or puts the car into a wall, and a mean Q-value of those two futures
+describes neither. A quantile critic can represent "usually 90, occasionally 5".
+
+**Nothing has been trained past a smoke run yet.** For scale: trivial policies
+reach 3–15% of a lap and a random one reaches 0.1%, so the reward discriminates —
+whether it discriminates all the way to a finish is the open question. And with
+only four reference lines this is a memorisation problem until the procedural
+generator lands.
+
 ## Architecture
 
 ```
@@ -101,7 +126,12 @@ polytrack/
   observation.py  Sophy-style observation vector (62 floats)
   env.py          Gymnasium env; progress reward + time penalty
   reference.py    replay -> trajectory -> reference line -> environment
+  library.py      tracks.npz: track code + reference line + par time, cached
   search.py       BeamSearch, CEMSearch, RefinementSearch
+  learning/
+    replay.py     sum-tree prioritised replay + n-step returns
+    iqn.py        the quantile critic, its loss, and the agent
+    collector.py  worker processes; one physics instance each
   recording.py    ghost/replay codec: five toggle sequences, deflate, base64url
   verify.py       the acceptance gate, mirroring the game's own Verify loop
   physics/
@@ -173,20 +203,20 @@ about the real one.
 
 ## Roadmap
 
-1. **Procedural track generator.** The editor plus exportable codes gives an
+1. **Run the training loop for real.** It is built and tested; it has not been
+   trained. This is now the shortest path to an agent that drives.
+2. **Procedural track generator.** The editor plus exportable codes gives an
    infinite training distribution. This is the piece that buys generalisation,
    and Trackmania projects never had it cheaply.
-2. **IQN training loop.** Distributional Q-learning with PER and n-step, multiple
-   collector processes feeding one learner — the Linesight architecture. Start
-   from CleanRL or Tianshou; both have readable IQN.
 3. **Policy-guided search.** Feed the trained policy into `BeamSearch` as an
    action prior so search only expands plausible actions. This is where record
    times come from: Yosh's RL agent reached human-record level, but going past it
    needed test-time search and exact-state exploitation.
 
-Before any of that, the reward coefficients need tuning against real physics.
-They have never been calibrated because until now there was nothing honest to
-calibrate them against.
+The largest available speed-up is sample efficiency rather than throughput.
+Episodes re-drive the first half of the track constantly; Linesight starts them
+from points spread along the reference line instead, which needs `save_state` to
+be cheaper than pickling a 24 MB heap.
 
 ## A note on leaderboards
 

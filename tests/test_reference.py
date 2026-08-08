@@ -133,7 +133,8 @@ def _out_and_back(length: float = 200.0, gap: float = 3.0) -> np.ndarray:
     3 m is well inside one part's width, so the two legs are genuinely close
     enough to be confused for each other.
     """
-    out = np.stack([np.arange(0.0, length, 1.0), np.zeros(200), np.zeros(200)], axis=1)
+    forward = np.arange(0.0, length, 1.0)
+    out = np.stack([forward, np.zeros_like(forward), np.zeros_like(forward)], axis=1)
     theta = np.linspace(-np.pi / 2, np.pi / 2, 24)
     turn = np.stack(
         [length + (gap / 2) * np.cos(theta),
@@ -141,8 +142,9 @@ def _out_and_back(length: float = 200.0, gap: float = 3.0) -> np.ndarray:
          np.zeros_like(theta)],
         axis=1,
     )
+    reverse = forward[::-1]
     back = np.stack(
-        [np.arange(length, 0.0, -1.0), np.full(200, gap), np.zeros(200)], axis=1
+        [reverse, np.full_like(reverse, gap), np.zeros_like(reverse)], axis=1
     )
     return np.vstack([out, turn, back])
 
@@ -230,6 +232,97 @@ def test_reward_does_not_depend_on_how_finely_it_is_sliced():
                 f"but {total:.6f} in the other split"
             )
         total = earned
+
+
+def test_a_faster_lap_scores_higher_than_a_slow_one():
+    """The property the whole reward exists to express.
+
+    Two runs covering identical ground, one taking twice as long. If the slower
+    one is not clearly worse, the time penalty is decoration -- which is what it
+    was, at 1.3% of the progress signal, before the scales were normalised.
+    """
+    line = Track.from_trajectory(_out_and_back(), spacing=1.0, smoothing=0)
+    tracker = ProgressTracker(line)
+
+    def score(seconds: float) -> float:
+        env = PolyTrackEnv(track=line, par_frames=20_000)
+        tracker.reset()
+        # Score the same arc profile by hand, independent of any backend: the
+        # question is about the reward function, not about driving.
+        per_metre = env._per_metre
+        per_second = env._per_second
+        return per_metre * line.length - per_second * seconds
+
+    assert score(20.0) > score(40.0)
+    assert score(18.0) > score(20.0), "beating par must pay"
+    # A lap at half the reference pace is worth roughly nothing.
+    assert abs(score(40.0)) < 1.0
+
+
+def test_the_reward_scale_is_the_same_on_every_track():
+    """A lap is a lap, whether the track is 1300 m or 3980 m.
+
+    Without this, one shared Q-function has to represent returns three times
+    larger on Summer 5 than on Summer 1 for reasons that have nothing to do with
+    driving well -- and the collectors all feed one buffer.
+    """
+    short = Track.from_trajectory(_out_and_back(length=100.0), spacing=1.0)
+    long = Track.from_trajectory(_out_and_back(length=400.0), spacing=1.0)
+    a = PolyTrackEnv(track=short, par_frames=10_000)
+    b = PolyTrackEnv(track=long, par_frames=40_000)
+
+    # A full lap is worth lap_reward on both, and par time costs the same.
+    assert abs(a._per_metre * short.length - b._per_metre * long.length) < 1e-9
+    assert abs(a._per_second * 10.0 - b._per_second * 40.0) < 1e-9
+
+
+def test_the_crash_exploit_does_not_depend_on_where_you_are():
+    """The suicide exploit, and why the failure penalty is proportional.
+
+    A failed episode ends, so its future is worth zero, while continuing to
+    drive badly keeps paying the time penalty. For a poor policy that makes
+    crashing the better move -- it is the cheapest way to stop the clock, and an
+    agent will find it.
+
+    Scaling the forfeit by the fraction of track *not* driven makes both sides
+    of that comparison scale identically with position, so the whole thing
+    cancels: whether crashing beats driving on stops being a question about
+    where the car is and becomes a single question about pace. A flat penalty
+    does not cancel, and leaves a band near the start where bailing out always
+    wins.
+    """
+    line = Track.from_trajectory(_out_and_back(), spacing=1.0)
+    cfg = PolyTrackEnv(track=line, par_frames=20_000).reward_config
+
+    def crash(done: float) -> float:
+        return -cfg.failure_penalty * cfg.lap_reward * (1.0 - done)
+
+    def carry_on(done: float, pace: float) -> float:
+        """Value of driving the rest of the lap at ``pace`` x the par speed."""
+        remaining = 1.0 - done
+        return remaining * cfg.lap_reward - (remaining / pace) * cfg.par_time_penalty
+
+    # Both sides scale with the track left, so the margin between them does too
+    # -- what has to be constant is the margin *per unit of remaining track*,
+    # because that is what fixes the sign, and the sign is the decision.
+    places = (0.1, 0.3, 0.5, 0.7, 0.9)
+    rates = [(carry_on(d, 0.6) - crash(d)) / (1.0 - d) for d in places]
+    assert max(rates) - min(rates) < 1e-9, (
+        f"whether crashing pays depends on position: {rates}"
+    )
+    assert min(rates) > 0.0, "crashing beats driving on at 60% of par pace"
+
+    # And the pace below which crashing wins, which is what the configuration
+    # actually chooses. A third of the human's pace is a car barely moving.
+    break_even = cfg.par_time_penalty / (
+        cfg.lap_reward * (1.0 + cfg.failure_penalty)
+    )
+    assert break_even < 0.4, (
+        f"an agent managing {break_even:.0%} of par pace would rather crash; "
+        "raise failure_penalty or lower par_time_penalty"
+    )
+    assert carry_on(0.0, break_even * 1.2) > crash(0.0)
+    assert carry_on(0.0, break_even * 0.8) < crash(0.0)
 
 
 def test_the_input_log_is_per_frame_so_a_tas_replays():

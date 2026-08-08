@@ -6,3 +6,4 @@ runs/
 geometry.json
 geometry.npz
 node_modules/
+tracks.npz
