@@ -220,6 +220,17 @@ def main(argv=None) -> int:
                         round(float(np.mean([e.fraction for e in episodes])), 3)
                         if episodes else None
                     ),
+                    # The mean mixes every actor, and the noisiest runs at
+                    # epsilon 0.4 -- a quarter of its actions are random, so it
+                    # can never complete a lap however good the policy is. The
+                    # near-greedy worker is the one whose progress answers "can
+                    # this thing drive yet", so it gets its own column.
+                    "greedy_fraction": (
+                        round(float(np.mean(
+                            [e.fraction for e in episodes
+                             if e.epsilon == min(x.epsilon for x in episodes)]
+                        )), 3) if episodes else None
+                    ),
                     "failures": {
                         reason: sum(1 for e in episodes if e.failure == reason)
                         for reason in sorted({e.failure for e in episodes})
@@ -233,7 +244,8 @@ def main(argv=None) -> int:
                     f"{collected:>7,} trans ({row['transitions_per_second']:.1f}/s) | "
                     f"ratio {row['achieved_ratio']:.2f} | "
                     f"loss {row['loss'] if row['loss'] is not None else '--':>8} | "
-                    f"lap {row['mean_fraction'] if row['mean_fraction'] is not None else '--':>5} | "
+                    f"lap {row['mean_fraction'] if row['mean_fraction'] is not None else '--':>5} "
+                    f"(greedy {row['greedy_fraction'] if row['greedy_fraction'] is not None else '--':>5}) | "
                     f"return {row['mean_return'] if row['mean_return'] is not None else '--':>7} | "
                     f"{row['episodes']} eps {row['failures']}"
                 )
