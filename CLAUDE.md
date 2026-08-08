@@ -104,10 +104,14 @@ milliseconds early. The game implements this check itself — the `Verify` path 
 `simulation_worker.bundle.js` steps a recording to `targetFrames` and asserts
 `hasFinished && frames == targetFrames` — and `polytrack/verify.py` mirrors it.
 
-**The harness is built and tested; what it lacks is an oracle.** It needs a
-recording *paired with the finish frame the real game recorded for it*. A
-recording alone will not do: it ends when the last key is released, not when the
-run ends.
+**The gate passes.** Six real runs across Summer 1, Summer 5 and Desert 3 —
+played in the game, read out of its local storage — replay here and land on
+their recorded finish frame to the millisecond, up to a 61,428-tick run. Winter
+5 is the one track that still fails; see PROJECT_STATUS.md §4.6.
+
+An oracle is a recording *paired with the finish frame the real game recorded
+for it*. A recording alone will not do: it ends when the last key is released,
+not when the run ends.
 
 Get one by playing a single track. On a personal best the client stores both in
 local storage under `polytrack_v5_prod_record_<slot>_default_<trackId>`:
@@ -117,7 +121,8 @@ python tools/extract_records.py -o records.json
 POLYTRACK_TRACKS=path/to/tracks python scripts/run_gate.py records.json
 ```
 
-Any track, any time. Do not reach for the leaderboard API — `vps.kodub.com`
+Any track, any time; play more of them and the evidence gets stronger. Do not
+reach for the leaderboard API — `vps.kodub.com`
 returns 403 on every path for this client, and that is an answer, not an
 obstacle to route around. The community TAS repo does not work either: its one
 ghost is in the pre-0.6.0 encoding and carries no finish frame, and v0.6.0

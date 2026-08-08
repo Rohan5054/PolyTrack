@@ -44,7 +44,7 @@ never was for Trackmania, where every project fought a closed real-time engine.
 
 ## 3. Where We Are Right Now
 
-### Stage 0 — Physics Backend · **GATE PASSED on Summer 1**
+### Stage 0 — Physics Backend · **GATE PASSED — 6 of 8 real runs, exactly**
 
 This is the only stage that matters right now. Everything else is scaffolding
 until it lands.
@@ -85,21 +85,26 @@ until it lands.
 - **The gate harness** — `polytrack/recording.py` (the input-recording codec),
   `polytrack/verify.py` (the game's own Verify loop), `tools/extract_records.py`
   and `scripts/run_gate.py`
-- **⭐ THE GATE PASSES.** A real 24.778-second run on Summer 1, played in the
-  game and read back out of its local storage, replays here and finishes on
-  **frame 24778 — exactly**. Not close: the same millisecond, after 24,778
-  physics ticks. The simulator is PolyTrack's.
+- **⭐ THE GATE PASSES.** Real runs, played in the game and read back out of
+  its local storage, replay here and land on their recorded finish frame **to
+  the millisecond**:
 
-**One known defect, precisely isolated:**
+  | Track | Recorded | Replayed | |
+  |---|---|---|---|
+  | Summer 1 | 24778 | 24778 | ✅ |
+  | Summer 1 | 24125 | 24125 | ✅ |
+  | Summer 1 | 23805 | 23805 | ✅ |
+  | Summer 5 | 61428 | 61428 | ✅ |
+  | Summer 5 | 57037 | 57037 | ✅ |
+  | Desert 3 | 21778 | 21778 | ✅ |
+  | Winter 5 | 21899 | diverges at 89% | ❌ |
+  | Winter 5 | 19025 | diverges at 70% | ❌ |
 
-- **Part 159 `StraightTilted` has the wrong collision mesh**, and it is the
-  same part that never matched the game's SHA-256. Winter 5 fails the gate;
-  it places 7 of them, the car falls off the elevated tilted section and
-  lands on the ground 13 m below, and Summer 1 — which places none — passes.
-  See §4.6.
+  Three tracks, six runs, exact — including a **61,428-tick run**. A simulator
+  0.01% off would miss that by six frames.
 
-That is 1 of 186 parts, affecting 1 of 17 official tracks (and 2 of 14
-community ones). Everything else is verified end to end.
+**One track still fails: Winter 5.** See §4.6. Everything the six passes
+exercise is verified end to end.
 
 ### Do not extract this by memory diffing
 
@@ -288,38 +293,54 @@ The TAS is still useful as a corroboration of the 1000 Hz finding — its input
 frames are 633, 1766, 4999, 14265, 14270, spaced in ways only milliseconds
 explain.
 
-### 4.6 The one remaining defect: part 159 `StraightTilted`
+### 4.6 Winter 5, the one track that still fails
 
-The gate found exactly the thing that was flagged as unresolved during geometry
-extraction, which is what a good gate is for.
+Both Winter 5 runs diverge, and **they diverge in different places** — 70% and
+89% of the way through. That rules out a single catastrophic geometry error and
+points at a small one that compounds. Winter 5 is by far the most demanding
+track of the four: 19 seconds, sustained 390–410 km/h, and vertical wall-rides.
 
-**The evidence is tight:**
+What the failing runs actually do:
 
-- 159 is the **only** part of 186 whose vertices never matched the game's
-  SHA-256, and the **only** part built through the quaternion path.
-- Winter 5 places **7** of them and fails the gate. Summer 1 places **none**
-  and passes exactly.
-- On the failing run the car ends at ground level, 13 m directly **below** a
-  `StraightTilted` at grid (-12, 2, -36) — it drove onto the banked section
-  and fell off. It had already cleared both checkpoints.
+- **19.025 s run:** drives cleanly for 13.3 s, clears both checkpoints, reaches
+  397 km/h, then leaves the track in a `WallTrack` section at (227, 60, -240),
+  tumbling (up-vector `[-0.68, -0.54, 0.50]`), and never lands.
+- **21.899 s run:** gets 89% of the way, ending at 12 km/h near the tilted
+  cluster at grid (-12, 2, -36).
 
-This also settles the question left open earlier. The theory was that the
-game's checksum might be stale, in which case the game would log an error and
-carry on using geometry that matched ours. It does not match ours, so **our
-mesh is wrong and the game's checksum is right.**
+Getting 70–89% of the way through a 400 km/h run before drifting is the
+signature of a small error, not a broken part.
 
-**What has been ruled out** (part 0 `Straight` is the same base mesh with no
-options and matches its checksum bit-for-bit, so the base geometry and the
-merge/toNonIndexed path are correct):
+**Prime suspect, but not proven: part 159 `StraightTilted`.** It is the only
+one of 186 whose vertices do not match the game's SHA-256, and — this turns out
+to be the reason nothing else catches it — `scale` and `quaternion` are each
+used by **exactly one entry in the whole part table, that one**. No other part
+exercises either code path.
+
+New evidence that our mesh really is wrong, not merely re-ordered: the
+`ToTiltedRight` transition part *is* checksum-verified, and a tilted straight
+has to mate with it. Its tilted face spans `y [2.06275535, 8.56283569]`; ours
+spans `y [2.06276226, 8.56281662]`. Close enough to drive on — the car
+traverses tilted sections earlier in the same run at 308 km/h without falling —
+but **wrong by ~2e-5**, which is exactly the kind of error that compounds.
+
+An earlier version of this document claimed the car "falls off the tilted
+section". That was over-attributed: the car clears the tilted sections and
+fails later, elsewhere.
+
+**Ruled out**, with part 0 `Straight` — the same base mesh with no options,
+matching bit-for-bit — as the control:
 
 | Ruled out | How |
 |---|---|
-| three.js version skew | Re-extracted against 0.181.0, the version the game pins. Identical result |
-| A different transform order | 168 orderings, inverses, fused matrices, flip and axis permutations — no match |
-| Different numeric literals | 288 combinations of angle (`atan(0.5)` and friends), scale and offset — no match |
-| A different maths implementation | The bundled three.js `BufferGeometry.scale`, `applyQuaternion` and `makeRotationFromQuaternion` are byte-for-byte upstream |
+| three.js version skew | Re-extracted against 0.181.0, the pinned version. Identical result |
+| Transform order | 168 orderings, inverses, fused matrices, flip and axis permutations |
+| Numeric literals | 288 combinations of angle, scale and offset |
+| Maths implementation | The bundled three.js `scale`, `applyQuaternion` and `makeRotationFromQuaternion` are byte-for-byte upstream |
+| Base mesh | `Road/Straight` is a 4-child group with a (0, 0, 11) group matrix; part 0 proves our handling of it |
+| Fitting to the transition | Solving the affine map from `ToTiltedRight`'s extremes reproduces its y-range exactly and still misses the checksum — the two models' extreme vertices are not the same points |
 
-The table entry is unambiguous:
+The table entry itself is unambiguous:
 
 ```js
 ["Road", "Straight", {
@@ -329,15 +350,18 @@ The table entry is unambiguous:
 }]
 ```
 
-**The decisive next experiment is to ask the game.** `tu()` in `main.bundle.js`
-hashes every part at startup and does
-`console.error("Part id 159 StraightTilted checksum mismatch: <computed> != <table>")`
-on a mismatch. Launch PolyTrack, open the dev console, and look:
+**The decisive next step is to make the game tell us its digest.** `tu()` in
+`main.bundle.js` hashes every part at startup and logs
+`"Part id 159 StraightTilted checksum mismatch: <computed> != <table>"`.
 
-- **No 159 error** → the game computes `48992a17…`, our pipeline is wrong, and
-  the difference is somewhere the source reading has not caught.
-- **A 159 error** → the table is stale, and the logged digest is the geometry
-  the game actually uses. Match candidates against that instead.
+The desktop build cannot show it: `electron/main.js` sets `devTools: !1`, so
+there is no console to open — an earlier instruction to open one was wrong.
+**Use the web build instead**, at `kodub.com/apps/polytrack`, where F12 works:
+
+- **No 159 error** → the game computes `48992a17…`, so our pipeline is wrong
+  and the difference is somewhere source reading has not caught.
+- **A 159 error** → the table is stale, the logged digest is the geometry the
+  game actually uses, and candidates can be matched against that instead.
 
 Until then Winter 5, Lenore and Natsu are off-limits for measurement. The other
 16 official tracks are unaffected.
