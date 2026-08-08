@@ -44,7 +44,7 @@ never was for Trackmania, where every project fought a closed real-time engine.
 
 ## 3. Where We Are Right Now
 
-### Stage 0 — Physics Backend · **backend running; the gate is the last step**
+### Stage 0 — Physics Backend · **GATE PASSED on Summer 1**
 
 This is the only stage that matters right now. Everything else is scaffolding
 until it lands.
@@ -82,18 +82,24 @@ until it lands.
 - **Save/restore round-trips exactly** — a 60-step tail replayed after restoring
   a snapshot matches the original record for record
 
-- **The gate harness is built and proven sharp** — `polytrack/recording.py`
-  (the input-recording codec), `polytrack/verify.py` (the game's own Verify
-  loop), `tools/extract_records.py` and `scripts/run_gate.py`. On a synthetic
-  sprint track the harness accepts the true finish frame and rejects it ±1 ms
+- **The gate harness** — `polytrack/recording.py` (the input-recording codec),
+  `polytrack/verify.py` (the game's own Verify loop), `tools/extract_records.py`
+  and `scripts/run_gate.py`
+- **⭐ THE GATE PASSES.** A real 24.778-second run on Summer 1, played in the
+  game and read back out of its local storage, replays here and finishes on
+  **frame 24778 — exactly**. Not close: the same millisecond, after 24,778
+  physics ticks. The simulator is PolyTrack's.
 
-**Blocked, and this is the only thing left in Stage 0:**
+**One known defect, precisely isolated:**
 
-- ⛔ **The gate has no oracle yet.** It needs one real run: an input recording
-  paired with the finish frame the game recorded for it. See §4.5.
+- **Part 159 `StraightTilted` has the wrong collision mesh**, and it is the
+  same part that never matched the game's SHA-256. Winter 5 fails the gate;
+  it places 7 of them, the car falls off the elevated tilted section and
+  lands on the ground 13 m below, and Summer 1 — which places none — passes.
+  See §4.6.
 
-Everything below the gate now works. What is untested is whether it matches the
-real game — which is exactly what the gate is for.
+That is 1 of 186 parts, affecting 1 of 17 official tracks (and 2 of 14
+community ones). Everything else is verified end to end.
 
 ### Do not extract this by memory diffing
 
@@ -281,6 +287,60 @@ one, since it spends longer in ordinary driving and less in edge cases.
 The TAS is still useful as a corroboration of the 1000 Hz finding — its input
 frames are 633, 1766, 4999, 14265, 14270, spaced in ways only milliseconds
 explain.
+
+### 4.6 The one remaining defect: part 159 `StraightTilted`
+
+The gate found exactly the thing that was flagged as unresolved during geometry
+extraction, which is what a good gate is for.
+
+**The evidence is tight:**
+
+- 159 is the **only** part of 186 whose vertices never matched the game's
+  SHA-256, and the **only** part built through the quaternion path.
+- Winter 5 places **7** of them and fails the gate. Summer 1 places **none**
+  and passes exactly.
+- On the failing run the car ends at ground level, 13 m directly **below** a
+  `StraightTilted` at grid (-12, 2, -36) — it drove onto the banked section
+  and fell off. It had already cleared both checkpoints.
+
+This also settles the question left open earlier. The theory was that the
+game's checksum might be stale, in which case the game would log an error and
+carry on using geometry that matched ours. It does not match ours, so **our
+mesh is wrong and the game's checksum is right.**
+
+**What has been ruled out** (part 0 `Straight` is the same base mesh with no
+options and matches its checksum bit-for-bit, so the base geometry and the
+merge/toNonIndexed path are correct):
+
+| Ruled out | How |
+|---|---|
+| three.js version skew | Re-extracted against 0.181.0, the version the game pins. Identical result |
+| A different transform order | 168 orderings, inverses, fused matrices, flip and axis permutations — no match |
+| Different numeric literals | 288 combinations of angle (`atan(0.5)` and friends), scale and offset — no match |
+| A different maths implementation | The bundled three.js `BufferGeometry.scale`, `applyQuaternion` and `makeRotationFromQuaternion` are byte-for-byte upstream |
+
+The table entry is unambiguous:
+
+```js
+["Road", "Straight", {
+  offset:     new Vector3(0, 5, 0),
+  scale:      new Vector3(1, 0.894425810573391, 1),
+  quaternion: new Quaternion().setFromEuler(new Euler(0, 0, -0.46364760900081)),
+}]
+```
+
+**The decisive next experiment is to ask the game.** `tu()` in `main.bundle.js`
+hashes every part at startup and does
+`console.error("Part id 159 StraightTilted checksum mismatch: <computed> != <table>")`
+on a mismatch. Launch PolyTrack, open the dev console, and look:
+
+- **No 159 error** → the game computes `48992a17…`, our pipeline is wrong, and
+  the difference is somewhere the source reading has not caught.
+- **A 159 error** → the table is stale, and the logged digest is the geometry
+  the game actually uses. Match candidates against that instead.
+
+Until then Winter 5, Lenore and Natsu are off-limits for measurement. The other
+16 official tracks are unaffected.
 
 ---
 
