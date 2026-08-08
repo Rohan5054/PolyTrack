@@ -42,7 +42,14 @@ def parse_args(argv=None):
     parser.add_argument("--library", type=Path, default=Path("tracks.npz"))
     parser.add_argument("--name", default=time.strftime("run-%Y%m%d-%H%M%S"))
     parser.add_argument("--workers", type=int, default=6)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument(
+        "--resume", type=Path, default=None,
+        help="an agent.pt to continue from. The replay buffer is not saved, so "
+             "it refills before gradient steps restart",
+    )
+    # 128 rather than 256: the learner shares a machine with the collectors and
+    # a step at 256 costs 68 ms, which cannot keep up with what they produce.
+    parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--capacity", type=int, default=200_000)
     parser.add_argument(
         "--learn-after", type=int, default=5_000,
@@ -102,9 +109,13 @@ def main(argv=None) -> int:
         iqn_config=iqn_config,
     )
 
-    agent = IQNAgent(iqn_config)
+    if args.resume:
+        agent = IQNAgent.load(args.resume)
+        print(f"\n  resumed from {args.resume} at {agent.steps:,} gradient steps")
+    else:
+        agent = IQNAgent(iqn_config)
     replay = PrioritisedReplay(
-        capacity=args.capacity, obs_dim=iqn_config.obs_dim
+        capacity=args.capacity, obs_dim=agent.config.obs_dim
     )
 
     print(f"\n  {args.name}")
@@ -116,6 +127,7 @@ def main(argv=None) -> int:
     pool = CollectorPool(args.workers, collector_config)
     pool.start()
 
+    started_steps = agent.steps
     started = time.monotonic()
     last_log = started
     collected = 0
@@ -127,7 +139,7 @@ def main(argv=None) -> int:
     pending_steps = 0.0
 
     try:
-        while agent.steps < args.max_steps:
+        while agent.steps - started_steps < args.max_steps:
             if time.monotonic() - started > args.max_seconds:
                 break
 
@@ -177,6 +189,13 @@ def main(argv=None) -> int:
                     "transitions": collected,
                     "buffer": len(replay),
                     "transitions_per_second": round(collected / max(elapsed, 1e-9), 1),
+                    # Gradient steps actually achieved per transition. If this
+                    # sits well under --replay-ratio the learner is the
+                    # bottleneck, not the collectors, and most of what they
+                    # produce is never learned from.
+                    "achieved_ratio": round(
+                        (agent.steps - started_steps) / max(collected, 1), 3
+                    ),
                     "loss": round(float(np.mean(losses)), 4) if losses else None,
                     "episodes": len(episodes),
                     "finishes": finishes,
@@ -199,6 +218,7 @@ def main(argv=None) -> int:
                     f"  {elapsed / 60:6.1f} min | "
                     f"{agent.steps:>7,} steps | "
                     f"{collected:>7,} trans ({row['transitions_per_second']:.1f}/s) | "
+                    f"ratio {row['achieved_ratio']:.2f} | "
                     f"loss {row['loss'] if row['loss'] is not None else '--':>8} | "
                     f"lap {row['mean_fraction'] if row['mean_fraction'] is not None else '--':>5} | "
                     f"return {row['mean_return'] if row['mean_return'] is not None else '--':>7} | "

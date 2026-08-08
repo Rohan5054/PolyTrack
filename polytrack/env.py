@@ -46,53 +46,61 @@ from .track import ProgressTracker, Track, straight_track
 
 @dataclass(frozen=True, slots=True)
 class RewardConfig:
-    """Reward coefficients, in units of *a lap* and *a par time*.
+    """Reward coefficients. **Every term is non-negative, and that is a rule.**
 
-    Both scales are relative rather than absolute, and that is the point. The
-    four tracks there are reference lines for run from 1300 m to 3980 m and from
-    197 km/h to 331 km/h average. Rewarding a metre of progress equally on all of
-    them makes a Summer 5 episode worth three times a Summer 1 episode, and a
-    single Q-function then has to represent returns that differ threefold for
-    reasons that have nothing to do with driving well. Normalising removes that,
-    and costs nothing: the environment already knows the length of its line, and
-    ``TrackEntry`` already carries the time the reference run took.
+    Scales are relative rather than absolute: a full lap is worth ``lap_reward``
+    on every track, whether it is 1300 m or 3980 m. Without that, one shared
+    Q-function has to represent returns three times larger on Summer 5 than on
+    Summer 1 for reasons that have nothing to do with driving well -- and all the
+    collectors feed one buffer.
 
-    So a full lap is worth ``lap_reward`` on every track, and taking the par time
-    to do it costs ``par_time_penalty`` on every track. With the defaults, a lap
-    at the human's pace nets 50 before bonuses, a lap at half that pace nets 0,
-    and standing still loses 50 per par time.
+    **Why nothing here is a penalty.** The first version charged a per-second
+    time penalty and a proportional forfeit on failure. Twelve minutes of
+    training found the exploit: with the episode over, a failure costs a fixed
+    amount whenever it happens, while staying alive keeps paying the clock -- so
+    the fastest possible failure wins. The agent learned to drive sideways off
+    the start line, the failure histogram flipped from 74% ``stalled`` to 88%
+    ``off_line``, mean return improved, and progress went to zero. It was
+    optimising correctly; the objective was wrong.
 
-    The previous defaults were the stand-in's, and they were badly wrong once
-    real speeds arrived: progress paid 55-92 per second against a time penalty of
-    1.2, so time pressure was 1.3% of the signal. That is precisely TMRL's
-    failure mode -- a policy that finishes reliably and several seconds off the
-    pace, because nothing ever punished it for dawdling.
+    Charging the full time budget on failure, so that bailing out early saves
+    nothing, inverts the exploit rather than fixing it: discounting shrinks any
+    large terminal penalty, so stalling for eight seconds before failing is worth
+    -46 against -200 for failing at once. The agent would learn to sit still.
 
-    These are a defensible starting point, not tuned values. Nothing has trained
-    against them yet. Whatever you change, run a search at it: search is an
-    adversarial consumer of a reward signal and finds exploits in seconds.
+    Both failures are the same failure. A negative step reward makes ending the
+    episode attractive; a large terminal penalty makes delaying it attractive.
+    The robust answer is that ending an episode must never pay, which means no
+    reward may be negative -- then a terminal state is worth zero and continuing
+    is worth at least zero, so quitting is never strictly better.
+
+    Time pressure comes from the finish bonus instead, which is what the agent
+    is really being asked to maximise, and secondarily from the discount: reward
+    collected sooner is worth more. That leaves the early curriculum honest --
+    learn to complete a lap, then learn to complete it quickly.
     """
 
     lap_reward: float = 100.0  # for covering the whole reference line
-    par_time_penalty: float = 50.0  # for taking exactly the par time to do it
     checkpoint_bonus: float = 5.0  # each checkpoint passed
-    finish_bonus: float = 50.0  # on completing the track
-    finish_time_weight: float = 0.5  # scales the speed component of the bonus
-    #: Fraction of the *un-driven* lap reward forfeited when a run fails -- goes
-    #: off the line, or stalls. Proportional rather than flat, and that is
-    #: load-bearing.
-    #:
-    #: A failed episode ends, so its future value is zero, while continuing to
-    #: drive badly keeps paying the time penalty. Early in training that makes
-    #: crashing on purpose the better move, and an agent will find it: it is the
-    #: cheapest way to stop the clock. A flat penalty only moves the threshold.
-    #: Scaling by how much track is left means bailing out at 10% costs 45 and
-    #: bailing out at 90% costs 5, so the exploit never pays where it would
-    #: otherwise be tempting.
-    failure_penalty: float = 0.5
+    #: Paid on finishing, scaled by ``par_time / elapsed``: the par time pays it
+    #: in full, twice the par time pays half, and beating par pays more. This is
+    #: the entire source of time pressure, so it is deliberately large relative
+    #: to a lap.
+    finish_bonus: float = 100.0
+    #: Cap on that ratio, so the first freakishly quick run cannot dominate the
+    #: replay buffer.
+    finish_speed_cap: float = 3.0
     #: Par pace assumed when no reference time is supplied, m/s. 60 is 216 km/h,
     #: at the slow end of what the human runs average.
     nominal_speed: float = 60.0
+
+    #: Per second of simulated time. **Leave at zero unless you know why.**
+    #: Any positive value re-creates the suicide exploit above, in proportion to
+    #: its size: it becomes worth ending an episode early to stop paying it. Only
+    #: consider it once the agent finishes reliably, and re-read the failure
+    #: histogram afterwards -- a jump in ``off_line`` at zero progress is the
+    #: signature.
+    time_penalty: float = 0.0
 
 
 class PolyTrackEnv(gym.Env):
@@ -166,7 +174,7 @@ class PolyTrackEnv(gym.Env):
             else self.track.length / self.reward_config.nominal_speed
         )
         self._per_metre = self.reward_config.lap_reward / max(self.track.length, 1e-6)
-        self._per_second = self.reward_config.par_time_penalty / self.par_seconds
+        self._per_second = self.reward_config.time_penalty
 
         self.ticks_per_step = ticks_for(self.backend, self.control_interval_ms)
         self._ms_per_tick = 1000.0 / self.backend.rate
@@ -258,19 +266,15 @@ class PolyTrackEnv(gym.Env):
 
         if result.finished:
             terminated = True
-            # Scale the completion bonus by how quickly it was achieved, so the
-            # agent keeps improving after it can merely finish. Capped, because
-            # an uncapped ratio makes the first freakishly fast run dominate the
-            # replay buffer.
+            # The only time pressure in the whole reward. Scaled by how quickly
+            # the lap was done, capped so one freak run cannot dominate replay.
             speed_factor = self.par_seconds / max(elapsed_ms / 1000.0, 1e-6)
-            reward += cfg.finish_bonus * (
-                1.0 + cfg.finish_time_weight * min(speed_factor, 3.0)
-            )
+            reward += cfg.finish_bonus * min(speed_factor, cfg.finish_speed_cap)
         elif result.terminated or stalled or lost:
+            # No penalty. A failed episode simply stops earning, and the lap
+            # reward it never collected is the whole of its cost -- see
+            # RewardConfig for what happened when this was a penalty instead.
             terminated = True
-            # Forfeit a share of the track never driven. See RewardConfig.
-            remaining = 1.0 - min(self._previous_arc / self.track.length, 1.0)
-            reward -= cfg.failure_penalty * cfg.lap_reward * remaining
             failure = "off_line" if lost else "stalled" if stalled else "terminated"
         elif elapsed_ms >= self.time_limit_ms:
             truncated = True

@@ -58,12 +58,20 @@ class IQNConfig:
     #: degrades the quantile function's resolution near the tails.
     n_cos: int = 64
     #: Quantile samples for the online net, the target, and action selection.
+    #: ``n_tau_action`` applies when *acting*, where the cost is one observation
+    #: against 45 ms of physics and irrelevant. The bootstrap argmax inside
+    #: ``learn`` uses ``n_tau`` instead: at 32 it was two thirds of the gradient
+    #: step, and a learner running at 3 steps/s against 66 transitions/s is not
+    #: learning from most of what it collects.
     n_tau: int = 8
     n_tau_prime: int = 8
     n_tau_action: int = 32
     lr: float = 5e-5
     adam_eps: float = 1e-4  # 1e-8 underflows in float32 on sparse gradients
-    gamma: float = 0.99
+    #: 0.999 at a 50 ms control interval is a horizon of ~35 s, which spans a
+    #: lap. The usual 0.99 is five seconds -- shorter than a corner sequence, so
+    #: the agent cannot value the far side of the track at all.
+    gamma: float = 0.999
     kappa: float = 1.0  # Huber transition point
     grad_clip: float = 10.0
     target_update_every: int = 1000
@@ -217,7 +225,7 @@ class IQNAgent:
 
         with torch.no_grad():
             # Double Q: the online net picks, the target net values.
-            best = self.online.q_values(next_obs, cfg.n_tau_action).argmax(dim=1)
+            best = self.online.q_values(next_obs, cfg.n_tau).argmax(dim=1)
             taus_prime = torch.rand(batch_size, cfg.n_tau_prime, device=self.device)
             next_quantiles = self.target(next_obs, taus_prime)
             next_quantiles = next_quantiles.gather(

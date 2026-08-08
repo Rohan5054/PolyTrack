@@ -237,26 +237,28 @@ def test_reward_does_not_depend_on_how_finely_it_is_sliced():
 def test_a_faster_lap_scores_higher_than_a_slow_one():
     """The property the whole reward exists to express.
 
-    Two runs covering identical ground, one taking twice as long. If the slower
-    one is not clearly worse, the time penalty is decoration -- which is what it
-    was, at 1.3% of the progress signal, before the scales were normalised.
+    Two runs covering identical ground, one taking twice as long. Progress pays
+    the same for both -- it is the same ground -- so the entire difference has to
+    come from the finish bonus, which is now the only term that knows what time
+    it is.
     """
     line = Track.from_trajectory(_out_and_back(), spacing=1.0, smoothing=0)
-    tracker = ProgressTracker(line)
+    env = PolyTrackEnv(track=line, par_frames=20_000)
+    cfg = env.reward_config
 
     def score(seconds: float) -> float:
-        env = PolyTrackEnv(track=line, par_frames=20_000)
-        tracker.reset()
-        # Score the same arc profile by hand, independent of any backend: the
-        # question is about the reward function, not about driving.
-        per_metre = env._per_metre
-        per_second = env._per_second
-        return per_metre * line.length - per_second * seconds
+        # A completed lap, scored by hand: the question is about the reward
+        # function, not about driving.
+        lap = env._per_metre * line.length
+        return lap + cfg.finish_bonus * min(
+            env.par_seconds / seconds, cfg.finish_speed_cap
+        )
 
     assert score(20.0) > score(40.0)
     assert score(18.0) > score(20.0), "beating par must pay"
-    # A lap at half the reference pace is worth roughly nothing.
-    assert abs(score(40.0)) < 1.0
+    # And the gap has to be big enough to be worth chasing against the noise of
+    # a whole lap's progress reward.
+    assert score(18.0) - score(20.0) > 0.05 * cfg.lap_reward
 
 
 def test_the_reward_scale_is_the_same_on_every_track():
@@ -270,59 +272,77 @@ def test_the_reward_scale_is_the_same_on_every_track():
     long = Track.from_trajectory(_out_and_back(length=400.0), spacing=1.0)
     a = PolyTrackEnv(track=short, par_frames=10_000)
     b = PolyTrackEnv(track=long, par_frames=40_000)
+    cfg = a.reward_config
 
-    # A full lap is worth lap_reward on both, and par time costs the same.
+    # A full lap is worth lap_reward on both.
     assert abs(a._per_metre * short.length - b._per_metre * long.length) < 1e-9
-    assert abs(a._per_second * 10.0 - b._per_second * 40.0) < 1e-9
+
+    # And finishing at the same multiple of par pays the same on both, which is
+    # what makes the finish bonus comparable across a shared replay buffer.
+    def finish_at(env, multiple: float) -> float:
+        return cfg.finish_bonus * min(
+            env.par_seconds / (env.par_seconds * multiple), cfg.finish_speed_cap
+        )
+
+    for multiple in (0.8, 1.0, 2.0):
+        assert abs(finish_at(a, multiple) - finish_at(b, multiple)) < 1e-9
 
 
-def test_the_crash_exploit_does_not_depend_on_where_you_are():
-    """The suicide exploit, and why the failure penalty is proportional.
+def test_no_step_reward_is_ever_negative():
+    """Ending an episode must never pay. This is the invariant that enforces it.
 
-    A failed episode ends, so its future is worth zero, while continuing to
-    drive badly keeps paying the time penalty. For a poor policy that makes
-    crashing the better move -- it is the cheapest way to stop the clock, and an
-    agent will find it.
+    A real training run found the alternative in twelve minutes. With a
+    per-second time penalty and a forfeit on failure, a failure costs a fixed
+    amount whenever it arrives while staying alive keeps paying the clock -- so
+    the fastest possible failure wins, and the agent learned to drive sideways
+    off the start line. The failure histogram went from 74% ``stalled`` to 88%
+    ``off_line``, mean return improved, and progress collapsed to zero.
 
-    Scaling the forfeit by the fraction of track *not* driven makes both sides
-    of that comparison scale identically with position, so the whole thing
-    cancels: whether crashing beats driving on stops being a question about
-    where the car is and becomes a single question about pace. A flat penalty
-    does not cancel, and leaves a band near the start where bailing out always
-    wins.
+    Charging the full time budget on failure inverts it rather than fixing it:
+    discounting shrinks a large terminal penalty, so stalling becomes optimal.
+
+    With every reward non-negative a terminal state is worth zero and continuing
+    is worth at least zero, so quitting is never strictly better -- whatever the
+    discount, whatever the policy, at any point on the track.
+    """
+    line = Track.from_trajectory(_out_and_back(), spacing=1.0, smoothing=0)
+    env = PolyTrackEnv(track=line, par_frames=20_000, control_interval_ms=50.0)
+
+    rng = np.random.default_rng(0)
+    for episode in range(6):
+        env.reset()
+        for _ in range(400):
+            # Deliberately terrible driving: reverse, brake, flail. Every one of
+            # these ends in a failure, and none of them may pay less than zero.
+            action = int(rng.integers(0, 9))
+            _, reward, terminated, truncated, info = env.step(action)
+            assert reward >= 0.0, (
+                f"episode {episode} paid {reward:.4f} at arc "
+                f"{info['arc']:.1f} m -- a negative reward makes ending the "
+                "episode profitable, which is the exploit this pins"
+            )
+            if terminated or truncated:
+                break
+
+
+def test_only_finishing_stops_the_clock():
+    """Time pressure has to come from the finish bonus, since nothing else can.
+
+    With no per-step penalty the only term that knows about time is the finish
+    bonus, so it has to be the thing that separates a fast lap from a slow one.
     """
     line = Track.from_trajectory(_out_and_back(), spacing=1.0)
     cfg = PolyTrackEnv(track=line, par_frames=20_000).reward_config
 
-    def crash(done: float) -> float:
-        return -cfg.failure_penalty * cfg.lap_reward * (1.0 - done)
+    def finish_pay(seconds: float, par: float = 20.0) -> float:
+        return cfg.finish_bonus * min(par / seconds, cfg.finish_speed_cap)
 
-    def carry_on(done: float, pace: float) -> float:
-        """Value of driving the rest of the lap at ``pace`` x the par speed."""
-        remaining = 1.0 - done
-        return remaining * cfg.lap_reward - (remaining / pace) * cfg.par_time_penalty
-
-    # Both sides scale with the track left, so the margin between them does too
-    # -- what has to be constant is the margin *per unit of remaining track*,
-    # because that is what fixes the sign, and the sign is the decision.
-    places = (0.1, 0.3, 0.5, 0.7, 0.9)
-    rates = [(carry_on(d, 0.6) - crash(d)) / (1.0 - d) for d in places]
-    assert max(rates) - min(rates) < 1e-9, (
-        f"whether crashing pays depends on position: {rates}"
-    )
-    assert min(rates) > 0.0, "crashing beats driving on at 60% of par pace"
-
-    # And the pace below which crashing wins, which is what the configuration
-    # actually chooses. A third of the human's pace is a car barely moving.
-    break_even = cfg.par_time_penalty / (
-        cfg.lap_reward * (1.0 + cfg.failure_penalty)
-    )
-    assert break_even < 0.4, (
-        f"an agent managing {break_even:.0%} of par pace would rather crash; "
-        "raise failure_penalty or lower par_time_penalty"
-    )
-    assert carry_on(0.0, break_even * 1.2) > crash(0.0)
-    assert carry_on(0.0, break_even * 0.8) < crash(0.0)
+    assert finish_pay(15.0) > finish_pay(20.0) > finish_pay(40.0)
+    # Beating par has to be worth materially more than merely finishing, or the
+    # agent stops improving the moment it can complete a lap -- TMRL's plateau.
+    assert finish_pay(15.0) - finish_pay(20.0) > 0.1 * cfg.lap_reward
+    # And the cap has to bind, so one freak run cannot dominate the buffer.
+    assert finish_pay(0.001) == cfg.finish_bonus * cfg.finish_speed_cap
 
 
 def test_the_input_log_is_per_frame_so_a_tas_replays():

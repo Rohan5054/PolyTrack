@@ -236,13 +236,20 @@ def test_progress_reward_is_not_payable_twice():
     assert arc_now < high_water, "car did not actually move backwards"
 
     # Now re-drive the ground already covered: it must pay nothing.
+    #
+    # Exactly zero, not merely negative. Every reward term is non-negative now
+    # -- a negative one makes ending the episode profitable, which a training
+    # run duly exploited -- so "pays nothing" is the strongest statement
+    # available here, and it is the one that matters.
     regained = 0.0
     for _ in range(10):
         _, reward, term, trunc, _ = env.step(3)
         regained += reward
         if term or trunc:
             break
-    assert regained < 0, "re-covering old ground produced positive reward"
+    assert regained == 0.0, (
+        f"re-covering old ground paid {regained}, so the high-water mark leaks"
+    )
 
 
 def test_env_exports_replayable_tas():

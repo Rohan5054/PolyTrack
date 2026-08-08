@@ -276,21 +276,42 @@ rates and a tunable control interval make "per frame" three different things.
 `test_reward_does_not_depend_on_how_finely_it_is_sliced` pins this: the same
 drive cut into twice as many decisions must pay exactly the same.
 
-**A failed episode must be cut, and the cut must not pay.** The real backend
-never reports `terminated` — the module has no notion of "off track", so without
-a stall cut a run that fails on the first corner still costs the whole time
-limit, which at ~0.5× realtime is a collector idling for a minute. But ending an
-episode also zeroes its future, so for a poor policy crashing becomes the
-cheapest way to stop the clock. The forfeit is therefore **proportional to the
-track not driven**, which makes both sides of that comparison scale identically
-with position: whether crashing pays stops depending on where the car is and
-becomes one question about pace. With the defaults the break-even is a third of
-the human's speed. `test_the_crash_exploit_does_not_depend_on_where_you_are`
-pins it.
+**No reward term may be negative.** This is the hardest-won rule in the file and
+it was learned from a real run, not from reasoning.
 
-The stall cut also needs a grace period, or it kills the bootstrap: a car on the
-line has not moved yet, and an untrained policy cut at 3 m every episode never
-collects the throttle-then-move transitions that teach it the throttle.
+The first version charged a per-second time penalty and forfeited a share of the
+un-driven lap on failure. Twelve minutes of training broke it. With the episode
+over, a failure costs a fixed amount whenever it arrives, while staying alive
+keeps paying the clock — so the *fastest possible failure wins*. The agent
+learned to drive sideways off the start line: the failure histogram went from
+74% `stalled` to 88% `off_line`, mean return improved, and progress fell to
+zero. It was optimising correctly. The objective was wrong.
+
+The obvious repair — charge the full time budget on failure, so bailing out
+early saves nothing — inverts the exploit instead of fixing it. Discounting
+shrinks any large terminal penalty, so stalling eight seconds before failing is
+worth −46 against −200 for failing at once, and the agent learns to sit still.
+
+Both are the same bug. **A negative step reward makes ending the episode
+attractive; a large terminal penalty makes delaying it attractive.** With every
+term non-negative, a terminal state is worth zero and continuing is worth at
+least zero, so quitting is never strictly better — for any policy, any discount,
+anywhere on the track. `test_no_step_reward_is_ever_negative` drives badly on
+purpose and checks it.
+
+Time pressure therefore comes from the finish bonus, scaled by `par / elapsed`.
+That leaves the curriculum honest: learn to complete a lap, then to complete it
+quickly. `RewardConfig.time_penalty` exists and defaults to 0 — every positive
+value reopens the exploit in proportion to its size.
+
+**A failed episode must still be cut.** The real backend never reports
+`terminated` — the module has no notion of "off track", a car in a ditch is just
+a car in a ditch — so without a stall cut a run that fails on the first corner
+costs the whole time limit, which at ~0.5× realtime is a collector idling for a
+minute. It took the smoke run from 0 completed episodes in 90 s to 17. The cut
+needs a grace period or it kills the bootstrap: a car on the line has not moved
+yet, and a policy cut at 3 m every episode never collects the
+throttle-then-move transitions that teach it the throttle.
 
 **A reference line is a route, not a centerline.** A track code says where every
 piece of road is and nothing about the order they are driven in, so
@@ -322,12 +343,14 @@ Done since: the track code decoder; the environment on real physics
 (`reference.env_from_recording`); reward coefficients rescaled to laps and par
 times; and the IQN training loop with parallel collectors.
 
-1. **Actually train something.** The loop runs and the plumbing is tested, but
-   **nothing has been trained past a 90-second smoke run.** For scale, trivial
-   policies reach 3–15% of a lap and random reaches 0.1%, so the reward
-   discriminates; whether it discriminates all the way to a finish is unknown.
-   Expect hours, and watch the `failures` histogram — all `off_line` means the
-   car cannot hold the track, all `stalled` means it cannot leave the line.
+1. **Actually train something.** One 17-minute run has happened; it found the
+   reward exploit above and was stopped. The reward has been rebuilt since and
+   **nothing has trained against the new one.** Watch three things: `ratio`
+   (achieved gradient steps per transition — under ~0.3 and the learner is
+   wasting most of what the collectors produce), `lap`, and the `failures`
+   histogram. All `off_line` means the car cannot hold the track; all `stalled`
+   means it cannot leave the line; a sudden flip between them at zero progress
+   means the reward is being gamed again.
 2. **Procedural track generator** — the editor plus exportable codes gives an
    infinite training distribution. This is what buys generalisation, and no
    Trackmania project had it cheaply. It also retires the reference-line
