@@ -30,8 +30,11 @@ from .base import CarState, StepResult
 
 # Fixed physics step. Deliberately *not* PolyTrack's, which is 1 ms: this model
 # is not PolyTrack either, and a 60 Hz stand-in keeps its episodes a sane length
-# for testing the layers above. Nothing may infer the real rate from here.
-DT = 1.0 / 60.0
+# for testing the layers above. Nothing may infer the real rate from here --
+# which is exactly why the rate is exposed as ``ReferencePhysics.rate`` rather
+# than left for callers to assume.
+RATE = 60.0
+DT = 1.0 / RATE
 
 
 class ReferencePhysics:
@@ -69,6 +72,11 @@ class ReferencePhysics:
         self._checkpoint = 0
         self._finished = False
         self.reset()
+
+    @property
+    def rate(self) -> float:
+        """Ticks per simulated second. 60 here, 1000 in the real module."""
+        return RATE
 
     @property
     def frame(self) -> int:
@@ -140,6 +148,27 @@ class ReferencePhysics:
         self._frame += 1
 
         return self._evaluate_progress()
+
+    def step_many(self, input_mask: int, ticks: int) -> StepResult:
+        """Hold one input across ``ticks`` frames.
+
+        A plain loop, because there is nothing to amortise here -- unlike the
+        real module, where the same method is what keeps a 1000 Hz backend
+        affordable. It exists so both backends answer the same question and the
+        environment does not have to know which one it is holding.
+        """
+        if ticks < 1:
+            raise ValueError(f"ticks must be at least 1, got {ticks}")
+        result = None
+        passed = False
+        for _ in range(ticks):
+            result = self.step(input_mask)
+            passed = passed or result.passed_checkpoint
+            if result.finished or result.terminated:
+                break
+        assert result is not None  # ticks >= 1
+        result.passed_checkpoint = passed
+        return result
 
     def _evaluate_progress(self) -> StepResult:
         arc, offset = self._progress.update(self._position)

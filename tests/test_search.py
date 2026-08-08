@@ -14,7 +14,6 @@ import numpy as np
 from polytrack.actions import ACTION_TO_MASK
 from polytrack.physics.reference import ReferencePhysics
 from polytrack.search import BeamSearch, CEMSearch
-from polytrack.tas import PHYSICS_HZ
 from polytrack.track import (
     ProgressTracker,
     chicane_track,
@@ -64,7 +63,9 @@ def test_progress_cannot_jump_further_than_the_car_can_travel():
         for _ in range(400):
             result = sim.step(ACTION_TO_MASK[int(rng.integers(0, 9))])
             arc = tracker.update(result.state.position)[0]
-            travelled = result.state.speed / PHYSICS_HZ
+            # The stand-in's own rate, not PolyTrack's: this is a statement
+            # about how far the car in front of us moved in one of its frames.
+            travelled = result.state.speed / sim.rate
             assert abs(arc - previous) <= travelled + 1.0, (
                 f"{track.name}: arc moved {abs(arc - previous):.2f} m in one "
                 f"frame while the car travelled {travelled:.2f} m"

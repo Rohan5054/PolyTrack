@@ -33,9 +33,16 @@ from typing import Iterable, Iterator, Sequence
 
 from .actions import keys_to_mask, mask_to_keys
 
-#: The game's fixed physics rate. Everything in this project is frame-indexed
-#: rather than time-indexed; wall-clock never enters the simulation.
-PHYSICS_HZ = 60
+#: The game's fixed physics rate: one frame per millisecond. Everything in this
+#: project is frame-indexed rather than time-indexed; wall-clock never enters the
+#: simulation, and this constant exists only to *render* a frame count for human
+#: eyes.
+#:
+#: This said 60 until the real backend landed, which made every time this module
+#: printed 16.67x too long. The stand-in backend really does run at 60 Hz, but
+#: that is a property of the stand-in, not of PolyTrack: ask a backend for its
+#: own ``rate`` rather than assuming this one.
+FRAMES_PER_SECOND = 1000
 
 #: Upper bound on run length taken from the game client (Lv.maxFrames).
 MAX_FRAMES = 5_999_999
@@ -209,12 +216,17 @@ class TAS:
 
 
 def frames_to_seconds(frames: int) -> float:
-    """Convert a frame count to the wall-clock time the game would display."""
-    return frames / PHYSICS_HZ
+    """Convert a frame count to the time the game would display."""
+    return frames / FRAMES_PER_SECOND
 
 
 def format_time(frames: int) -> str:
-    """Format a frame count as the game does, ``M:SS.mmm``."""
+    """Format a frame count as the game does, ``M:SS.mmm``.
+
+    The client's ``formatTimeString`` divides ``numberOfFrames`` by 60000 for the
+    minutes and by 1000 for the seconds, which is the same arithmetic as this and
+    is one of the three independent confirmations that a frame is a millisecond.
+    """
     total = frames_to_seconds(frames)
     minutes, seconds = divmod(total, 60)
     return f"{int(minutes)}:{seconds:06.3f}"

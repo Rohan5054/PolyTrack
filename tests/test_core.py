@@ -218,14 +218,17 @@ def test_progress_reward_is_not_payable_twice():
     stretch of track and farm progress reward forever instead of finishing --
     a standard exploit in progress-shaped racing rewards.
     """
+    # Step counts are in decisions, not frames: with the default 50 ms interval
+    # against the 60 Hz stand-in each one is three frames, so these are the same
+    # simulated durations this test has always used.
     env = PolyTrackEnv(track=straight_track(length=400.0))
     env.reset()
-    for _ in range(50):
+    for _ in range(17):
         env.step(3)  # throttle forward
 
     # Brake. The car keeps coasting forward for a while before it reverses, so
     # the high-water mark legitimately rises during the first part of this.
-    for _ in range(120):
+    for _ in range(40):
         env.step(6)
     high_water = env._previous_arc
 
@@ -234,7 +237,7 @@ def test_progress_reward_is_not_payable_twice():
 
     # Now re-drive the ground already covered: it must pay nothing.
     regained = 0.0
-    for _ in range(30):
+    for _ in range(10):
         _, reward, term, trunc, _ = env.step(3)
         regained += reward
         if term or trunc:
@@ -255,7 +258,10 @@ def test_env_exports_replayable_tas():
 
     replay_env = PolyTrackEnv(track=chicane_track())
     outcome = replay_env.replay_tas(tas)
-    assert outcome["frames"] == len(env._input_log)
+    # The TAS is per physics frame, not per decision: a nine-action episode at
+    # the default control interval is 27 frames, and all 27 have to replay.
+    assert outcome["frames"] == env.elapsed_frames
+    assert tas.n_frames == env.elapsed_frames
 
 
 def _resting_state(position, forward=(0.0, 1.0, 0.0)):
@@ -298,7 +304,7 @@ def test_observation_and_reward_read_progress_from_the_same_source():
     env.reset()
     observation = None
     info = {}
-    for _ in range(120):
+    for _ in range(40):
         observation, _, terminated, truncated, info = env.step(
             mask_to_action(UP | LEFT)
         )
@@ -313,9 +319,16 @@ def test_observation_and_reward_read_progress_from_the_same_source():
 
 
 def test_format_time_matches_game_style():
+    """A frame is a millisecond, so a frame count reads out directly.
+
+    This asserted 60 Hz until the real backend landed, which made every time the
+    project printed 16.67x too long. The values below are real recorded runs --
+    Summer 1 and Summer 5 -- so the expected strings are the ones the game
+    itself displayed.
+    """
     assert format_time(0) == "0:00.000"
-    assert format_time(60) == "0:01.000"
-    assert format_time(3690) == "1:01.500"
+    assert format_time(23805) == "0:23.805"
+    assert format_time(61428) == "1:01.428"
 
 
 if __name__ == "__main__":

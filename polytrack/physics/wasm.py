@@ -674,6 +674,11 @@ class WasmPhysics:
     # -- protocol -----------------------------------------------------------
 
     @property
+    def rate(self) -> float:
+        """Ticks per simulated second: 1000, fixed inside the module."""
+        return RATE
+
+    @property
     def frame(self) -> int:
         return self._frame
 

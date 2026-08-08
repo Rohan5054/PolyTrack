@@ -51,8 +51,11 @@ until it lands.
 
 **Done:**
 
-- Full stack built and tested — **71 tests passing** (24 core + 9 search +
-  7 trackcode + 17 wasm + 14 recording/gate)
+- Full stack built and tested — **85 tests passing** (24 core + 9 search +
+  7 trackcode + 17 wasm + 14 recording/gate + 14 reference)
+- The environment runs on the real backend. `reference.env_from_recording`
+  returns a `PolyTrackEnv` driving PolyTrack's own module on a reference line
+  derived from a real run; `scripts/reference_demo.py` shows it on all four
 - Discrete action space, `.tas` format, track geometry, Sophy-style observations,
   reward function, Gymnasium environment
 - Search layer: `BeamSearch`, `CEMSearch`, `RefinementSearch`
@@ -354,6 +357,23 @@ then 15) wrapped in a custom base62 alphabet. `Track.fromSaveString` in
 All 17 official tracks ship as `.track` files inside `app.asar`, so the decoder
 has a ready-made test corpus with known-good contents.
 
+### Stage 1.5 — Reference Lines · **Done**
+A track code says where every piece of road is and nothing about the route
+through it, which the reward and the observation both need. So the route comes
+from a lap that was driven: replay a recording through the verified backend,
+sample the trajectory, resample at fixed arc spacing. Linesight's design, and
+the same caveat — it is one lap, not the middle of the road, so lateral offset
+is distance from that lap.
+
+Sampling is exact. Runs of held input are cut into sample-sized pieces, which
+feeds the module the same input on the same tick, so a sampled replay still
+lands on the recorded finish frame. `test_sampling_a_replay_does_not_perturb_it`
+asserts that rather than assuming it.
+
+Measured, on the four tracks we have runs for: 1300–3980 m of line, 197–331 km/h
+average, 482 km/h peak. Building one costs a full replay — 46 s of wall clock
+for a 19-second run, which is the ~1× realtime figure showing up again.
+
 ### Stage 2 — Procedural Track Generator
 Generate thousands of valid track codes spanning straights, curves, jumps and
 loops. **This is what buys generalisation.** A policy trained on 17 official
@@ -392,8 +412,12 @@ Service (added in v0.6.0) before submitting anything.
 | `map_wasm.py` | Call exports, diff memory ⚠️ *no instance isolation — results after a stack-modifying call are unreliable* |
 | `step_probe.py` | ⚠️ **Superseded and misleading.** Its determinism check passes on a no-op call sequence, and its "smoothest offsets" are integer counters read as denormal floats. The glue JS supersedes all of it. |
 | `api_probe.py` | Drove the call sequence with synthetic geometry to confirm the export mapping. Superseded by `polytrack/physics/wasm.py`, which is now the reference |
-| `extract_geometry.mjs` | Node + three.js. Replays the game's model pipeline to recover every part's collision mesh, checked against the game's own SHA-256s |
+| `extract_geometry.mjs` | Node + three.js. Reimplements the game's model pipeline; 185/186 parts bit-identical. Keep it for its checksum verification, which is what localised part 159 — but it is no longer the source of the geometry |
+| `capture_geometry.py` | **The primary path.** Serves your local client over 127.0.0.1 with a hook ahead of its deferred bundles, and intercepts the `Init` message it sends its simulation worker, which carries every part's real collision mesh. Observation instead of reimplementation |
 | `build_geometry.py` | Packs that JSON into `geometry.npz` (0.77 MB) for the backend |
+| `extract_records.py` | Scrapes personal bests out of the client's Chromium local storage — a recording paired with the finish frame the game recorded for it, which is what an oracle is |
+| `run_gate.py` | The acceptance gate over every record. Exit 0 only if all verify |
+| `reference_demo.py` | Track code → meshes → module → trajectory → reference line → observation → reward, on every record that matches a track |
 
 ---
 
@@ -422,7 +446,19 @@ Each has a test. Each was a real bug found the hard way.
   assert 60 Hz and quote that same `maxFrames` one clause later — the two are
   not compatible, and the frame count is the one that checks out.
   It follows that an agent must hold an action across a control interval rather
-  than choose 1000 times a second; `WasmPhysics.step_many` exists for that.
+  than choose 1000 times a second; `WasmPhysics.step_many` exists for that, and
+  `PolyTrackEnv` holds one action for `control_interval_ms` (50 ms by default,
+  4.2 m at 300 km/h — just under the 5 m part grid).
+- **A backend knows its own rate; nothing above it may assume one.**
+  `format_time` counts milliseconds. `tas.py` kept `PHYSICS_HZ = 60` right
+  through the 1000 Hz correction, so every time this project printed for the
+  stand-in was 16.67× too long, and `SearchResult.time` was wrong for whichever
+  backend it was not built against. Fixed; `SearchResult` now carries the rate
+  that produced its frame count, because a bare frame count is not a time.
+- **Reward coefficients are per second, not per frame.** With two backends at
+  different rates and a tunable control interval, "per frame" means three
+  different things. `test_reward_does_not_depend_on_how_finely_it_is_sliced`
+  pins it: the same drive cut into twice as many decisions pays the same.
 - ~~Run the WASM single-threaded.~~ Resolved, not a risk: the module imports no
   pthread hooks and uses unshared memory. PolyTrack's multithreading is at the
   *JS* level — one worker per car — so a Python host gets a single-threaded
@@ -444,7 +480,8 @@ Each has a test. Each was a real bug found the hard way.
 | **Simulation runs at roughly 1× realtime** | Training throughput. This is the big one | ~650–800 µs per 1 ms tick measured (sustained ~2.3 ms under thermal throttling on this laptop). Cost is nearly flat in track size, so it is the module's own fixed work, not our geometry. Python overhead is already down to ~0 via the raw wasmtime call path — the remaining cost is inside the module. Mitigation is parallel collectors, which the Linesight architecture already assumes; measure again on a desktop before drawing conclusions |
 | Whole-heap snapshots are ~24 MB | Search throughput, not correctness | Measure before building the refiner; narrow the ranges if it bites |
 | `Date.now()` is read once during `__wasm_call_ctors` | If it seeds anything the physics touches, no host can ever match the game | Cheap to disprove: the gate catches it immediately |
-| Reward coefficients are untuned placeholders | Training won't converge | Re-tune once real physics lands |
+| Reward coefficients are untuned placeholders | Training won't converge | **Now actionable.** Real physics is attached and real reference lines exist; nothing has been tuned yet. Run a search against any change |
+| Corridor rays are faked from the reference line | Observation says "distance from the lap driven", not "distance to a wall" | `ObservationBuilder._cast_rays` is one method by design. The module has the collision geometry; ask it |
 | Physics changed across versions | Times not comparable | **Pinned to 0.6.2** — the worker throws on any other version string |
 | Stand-in physics times are meaningless | Misleading benchmarks | Re-measure everything after Stage 0 |
 
@@ -454,9 +491,12 @@ Each has a test. Each was a real bug found the hard way.
 
 - **Machine:** Windows, Python 3.14, VS Code + Claude Code extension
 - **Install:** `pip install -e .` (no `PYTHONPATH` needed)
-- **Tests:** 57 passing — `test_core.py` 24 · `test_search.py` 9 · `test_trackcode.py` 7 · `test_wasm.py` 17. The last two read the game's own
-  files when `POLYTRACK_TRACKS` / `geometry.npz` / `polytrack_physics.wasm`
-  are present, and skip cleanly when they are not
+- **Tests:** 85 passing — `test_core.py` 24 · `test_search.py` 9 ·
+  `test_trackcode.py` 7 · `test_wasm.py` 17 · `test_recording.py` 14 ·
+  `test_reference.py` 14. The last three read the game's own files when
+  `POLYTRACK_TRACKS` / `geometry.npz` / `polytrack_physics.wasm` are present,
+  and skip cleanly when they are not — so a green run without them does not
+  prove the backend was exercised
 - **Game:** PolyTrack desktop (Electron), extracted to `~\Polytrack\game`
 - **Version pinned: `0.6.2`.** The simulation worker throws on any mismatch, and
   replays are version-sensitive. Record it alongside every measured time.

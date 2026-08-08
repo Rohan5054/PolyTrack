@@ -82,9 +82,12 @@ def main() -> None:
         tas = env.export_tas()
         replay = env.replay_tas(tas)
         match = replay["frames"] == tas.n_frames
+        # Seconds via the backend's own rate. format_time counts in PolyTrack
+        # frames, which are milliseconds; the stand-in's are sixtieths.
+        seconds = tas.n_frames / env.backend.rate
         print(
             f"    TAS         {len(tas)} changes / {tas.n_frames} frames "
-            f"({format_time(tas.n_frames)})  replay_exact={match}"
+            f"({seconds:.3f} s of stand-in)  replay_exact={match}"
         )
 
     # Throughput. This number is the whole reason for building a headless
@@ -100,10 +103,18 @@ def main() -> None:
         if term or trunc:
             env.reset()
     elapsed = time.perf_counter() - start
-    print(f"    {n / elapsed:,.0f} env steps/s  ({n / elapsed / 60:.0f}x realtime)")
+    # Realtime against how much time was *simulated*, not against 60 Hz: one
+    # step is a control interval now, and against the real 1000 Hz module the
+    # same step count is a very different amount of driving.
+    simulated = n * env.ticks_per_step / env.backend.rate
+    print(
+        f"    {n / elapsed:,.0f} env steps/s  "
+        f"({simulated / elapsed:.0f}x realtime, {env.ticks_per_step} frames/step)"
+    )
     print("    Still dominated by the Python observation builder, not physics.")
-    print("    Next wins: batch observations across a vectorised env, and move")
-    print("    the raycasts to real collision geometry once WASM is wired up.\n")
+    print("    The real module costs ~700 us per 1 ms tick, so on PolyTrack's")
+    print("    own physics this figure is about 1x realtime and the collector")
+    print("    count, not the step cost, is what buys throughput.\n")
 
 
 if __name__ == "__main__":

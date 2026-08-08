@@ -32,11 +32,12 @@ python tests/test_search.py     #  9 tests
 python tests/test_trackcode.py  #  7 tests
 python tests/test_wasm.py       # 17 tests
 python tests/test_recording.py  # 14 tests
+python tests/test_reference.py  # 14 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 71 pass. Two of the suites reach for the game's own files and are stronger
+All 85 pass. Three of the suites reach for the game's own files and are stronger
 when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -46,6 +47,13 @@ when they find them:
   `POLYTRACK_GEOMETRY` point at them). Neither file is committed — both are
   derived from Kodub's game. Without them those tests skip and say so, which
   means a green run does not by itself prove the backend was exercised.
+* `test_reference.py` additionally wants `POLYTRACK_TRACKS`, since it builds a
+  reference line from a real run in `records.json` and a recording identifies
+  its track only by id.
+
+`scripts/reference_demo.py` is the end-to-end demonstration: track code →
+collision meshes → module → replayed trajectory → reference line → observation →
+reward, on every record that matches an available track.
 
 ## The one thing blocking everything
 
@@ -146,9 +154,10 @@ polytrack/
   actions.py      9 discrete actions; opposing inputs cancel (per v0.6.0)
   tas.py          .tas read/write; carries explicit run length
   trackcode.py    PolyTrack2 code -> placed parts -> physics buffer
-  track.py        Track geometry + ProgressTracker
+  track.py        Track geometry, ProgressTracker, reference-line resampling
   observation.py  Sophy-style observation vector (62 floats)
   env.py          Gymnasium env; progress reward + time penalty
+  reference.py    replay -> trajectory -> reference line -> environment
   search.py       BeamSearch, CEMSearch, RefinementSearch
   recording.py    ghost/replay codec: five toggle sequences, deflate, base64url
   verify.py       the acceptance gate, mirroring the game's own Verify loop
@@ -217,6 +226,28 @@ The consequence: 1000 decisions a second is not an action space. The game
 records inputs as *changes*, so a held key spans hundreds of ticks. Agents hold
 one action across a control interval — `WasmPhysics.step_many(mask, ticks)` —
 which is both the right semantics and much faster than ticking from Python.
+`PolyTrackEnv` does this for you: one gym step is `control_interval_ms` of
+simulated time, 50 ms by default.
+
+**A backend knows its own rate; nothing above it may assume one.** `format_time`
+counts PolyTrack frames, i.e. milliseconds. The stand-in's frames are sixtieths,
+and anything that formats one without dividing by `backend.rate` first is
+reporting a time 16.67× too long. `tas.py` did exactly that until this was
+fixed, which is why `SearchResult` now carries a `rate` field: a bare frame
+count is not a time.
+
+**Reward coefficients are per second, not per frame.** Two backends at different
+rates and a tunable control interval make "per frame" three different things.
+`test_reward_does_not_depend_on_how_finely_it_is_sliced` pins this: the same
+drive cut into twice as many decisions must pay exactly the same.
+
+**A reference line is a route, not a centerline.** A track code says where every
+piece of road is and nothing about the order they are driven in, so
+`polytrack/reference.py` takes the route from a lap that was actually driven.
+Sampling that replay must not perturb it — runs of held input are cut into
+sample-sized pieces, which feeds the module the same input on the same tick, and
+`test_sampling_a_replay_does_not_perturb_it` checks the sampled replay still
+lands on the recorded finish frame.
 
 **Projection is windowed.** Without it, step cost grows with track length, so a
 2 km community track would run slower than a 200 m one for no reason.
@@ -231,14 +262,25 @@ that survives that is far more likely to be correct.
 
 ## Roadmap after Stage 0
 
-1. **Track code decoder** — parse `PolyTrack1...` base62 codes into a `Track`.
-   Unlocks exact geometry and the procedural generator.
+Done since: the track code decoder, and the environment now runs on real
+physics — `reference.env_from_recording(track, recording, frames)` returns a
+`PolyTrackEnv` driving PolyTrack's own module on a reference line derived from
+that run.
+
+1. **Tune `RewardConfig`** — the coefficients have never been calibrated,
+   because until now there was nothing honest to calibrate them against. Real
+   speeds are 200–330 km/h average and 480 km/h peak on the four tracks we have
+   lines for. Run a search against whatever you change; search is an adversarial
+   consumer of the reward and finds exploits in seconds.
 2. **Procedural track generator** — the editor plus exportable codes gives an
    infinite training distribution. This is what buys generalisation, and no
-   Trackmania project had it cheaply.
+   Trackmania project had it cheaply. It also retires the reference-line
+   bootstrap: a generated track knows its own route, so it needs no lap driven
+   for it.
 3. **IQN training loop** — distributional Q-learning with PER and n-step,
    multiple collectors feeding one learner (the Linesight architecture). Start
-   from CleanRL or Tianshou.
+   from CleanRL or Tianshou. Note the throughput figure above: collectors are
+   mandatory, not an optimisation.
 4. **Policy-guided search** — feed the trained policy in as an action prior so
    search only expands plausible actions. This is the hybrid the review
    recommended, and where record times come from.
@@ -249,11 +291,18 @@ that survives that is far more likely to be correct.
   implementation (`beam_search()` / `cem_search()` / `refine()`) written before
   the collision was noticed. Its windowed refinement resumes from a saved anchor
   state rather than replaying from frame zero, which is worth porting if you
-  build a windowed refiner. Otherwise delete it.
-- Throughput figures in `README.md` were measured before `ProgressTracker`
-  landed. Re-measure before relying on them.
-- Reward coefficients in `RewardConfig` are placeholders. They cannot be tuned
-  meaningfully until the real physics backend exists.
+  build a windowed refiner. Otherwise delete it. It also still calls
+  `format_time` on stand-in frames, which now reads 16.67× short.
+- Reward coefficients in `RewardConfig` are placeholders. There is finally a
+  real backend to tune them against; nobody has.
+- `ObservationBuilder._cast_rays` still approximates the corridor from the
+  reference line and `Track.width`. With the real backend that measures distance
+  from *the driven lap*, not from a wall — the module has the collision geometry
+  and this should ask it. Isolated in one method for exactly this reason.
+- `WasmPhysics.save_state` pickles the entire heap (~24 MB a call). Correct, and
+  far too slow for beam search. Narrow it only with the gate to check against.
+- The 47 legacy pre-`PolyTrack2` community tracks still do not decode, which
+  shrinks the corpus the generator can learn a style from.
 
 ## Leaderboard etiquette
 

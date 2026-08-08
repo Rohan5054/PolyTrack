@@ -109,6 +109,17 @@ class PhysicsBackend(Protocol):
     """
 
     @property
+    def rate(self) -> float:
+        """Physics ticks per simulated second.
+
+        PolyTrack's is 1000 -- one tick is one millisecond, and is the unit every
+        published time is counted in. The stand-in's is 60. Nothing above this
+        layer may assume either: an agent's control interval is a duration, and
+        turning a duration into a tick count is what this is for.
+        """
+        ...
+
+    @property
     def frame(self) -> int:
         """Current physics frame index, starting at 0 after reset."""
         ...
@@ -119,6 +130,17 @@ class PhysicsBackend(Protocol):
 
     def step(self, input_mask: int) -> StepResult:
         """Advance exactly one physics frame with the given held-input mask."""
+        ...
+
+    def step_many(self, input_mask: int, ticks: int) -> StepResult:
+        """Hold one input across ``ticks`` frames, stopping early if the run ends.
+
+        Required, not optional. At 1000 Hz a per-tick decision loop is not an
+        action space, and driving the real module one tick at a time from Python
+        costs more in call overhead than in physics. Implementations must report
+        ``passed_checkpoint`` for the whole interval rather than just its last
+        tick, and must leave ``frame`` at however far they actually got.
+        """
         ...
 
     def save_state(self) -> bytes:
@@ -134,6 +156,15 @@ class PhysicsBackend(Protocol):
     def load_state(self, blob: bytes) -> CarState:
         """Restore state previously produced by :meth:`save_state`."""
         ...
+
+
+def ticks_for(backend: PhysicsBackend, milliseconds: float) -> int:
+    """How many backend ticks make up ``milliseconds`` of simulated time.
+
+    Always at least one, so a control interval shorter than a backend's tick
+    degrades to single-stepping rather than to standing still.
+    """
+    return max(1, round(milliseconds * backend.rate / 1000.0))
 
 
 def replay(backend: PhysicsBackend, masks, max_frames: int = 100_000) -> StepResult:

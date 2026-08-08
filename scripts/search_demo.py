@@ -30,9 +30,9 @@ import time
 import numpy as np
 
 from polytrack.actions import ACTION_TO_MASK
-from polytrack.physics.reference import ReferencePhysics
+from polytrack.physics.reference import RATE, ReferencePhysics
 from polytrack.search import BeamSearch, CEMSearch, RefinementSearch
-from polytrack.tas import TAS, format_time
+from polytrack.tas import TAS
 from polytrack.track import ProgressTracker, Track, chicane_track
 
 
@@ -96,13 +96,17 @@ def make_scripted(track: Track):
 
 
 def show(label: str, frames: int | None, baseline: int | None, extra: str = "") -> None:
+    """Report a frame count in seconds of the stand-in.
+
+    Not via ``format_time``, which counts in PolyTrack frames -- milliseconds --
+    and would read these 60 Hz frames as sixteen times shorter than they are.
+    """
     if frames is None:
         print(f"  {label:<28} did not finish   {extra}")
         return
-    line = f"  {label:<28} {format_time(frames):>9}"
+    line = f"  {label:<28} {frames / RATE:8.3f}s"
     if baseline is not None and frames != baseline:
-        delta = (frames - baseline) / 60.0
-        line += f"   {delta:+.3f}s"
+        line += f"   {(frames - baseline) / RATE:+.3f}s"
     else:
         line += "            "
     print(line + f"   {extra}")

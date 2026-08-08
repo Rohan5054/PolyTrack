@@ -8,14 +8,23 @@ Bezier curves to LIDAR returns -- because the map data was locked inside a close
 engine. PolyTrack exports every track as a portable ``PolyTrack1...`` base62
 code, so the geometry can be computed exactly and for free.
 
-Right now tracks are built from explicit waypoints. Decoding real PolyTrack
-track codes is a separate task (see ``tools/`` and the README); when that lands
-it produces a :class:`Track` and everything downstream is unchanged.
+There are two ways to get one. The demo tracks at the bottom of this file are
+built from explicit waypoints and exist to test the layers above.
+:meth:`Track.from_trajectory` builds one from a path the car actually drove --
+which is how a real PolyTrack track gets a line, since a track code describes a
+pile of placed parts and says nothing about the route through them.
+
+That second route is Linesight's, and it is worth being clear that it is a
+*reference line*, not a centerline: it is one good lap, so "lateral offset" means
+distance from that lap rather than from the middle of the road. For reward
+shaping and lookahead that is the better of the two -- it is the line the agent
+should be learning to beat. See :mod:`polytrack.reference` for the replay side.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 
@@ -64,6 +73,72 @@ class Track:
 
         if not self.checkpoint_indices:
             self.checkpoint_indices = (len(self.centerline) - 1,)
+
+    @classmethod
+    def from_trajectory(
+        cls,
+        points: np.ndarray,
+        *,
+        spacing: float = 2.0,
+        smoothing: int = 3,
+        width: float = 5.0,
+        checkpoint_samples: Sequence[int] = (),
+        name: str = "trajectory",
+    ) -> "Track":
+        """Build a reference line from a path the car drove.
+
+        Args:
+            points: (N, 3) positions in order along the run. Sampled however the
+                caller likes -- spacing is fixed up here -- but they must be in
+                driving order, since that order is the only thing that
+                disambiguates a track from itself where it crosses over.
+            spacing: Arc length between output points, in metres. Sets the
+                resolution of every projection downstream.
+            smoothing: Moving-average window, in output points, applied after
+                resampling. 0 or 1 disables it. The endpoints are pinned so the
+                start line and the finish do not creep.
+            width: Half-width of the corridor. With the real backend this is
+                **only an observation scale** -- the module decides what is
+                off-track, and it does not consult this.
+            checkpoint_samples: Indices into ``points`` at which checkpoints were
+                passed. Converted to indices into the resampled line.
+            name: Label for logs and TAS headers.
+
+        Resampling happens by arc length rather than by time, and that is the
+        whole point of doing it: a run sampled at a fixed millisecond interval
+        has points crowded together everywhere the car was slow, which is exactly
+        where it was cornering. Smoothing such a line would round off the corners
+        hardest and leave the straights alone.
+        """
+        raw = np.asarray(points, dtype=np.float64)
+        if raw.ndim != 2 or raw.shape[1] != 3:
+            raise ValueError(f"points must be (N, 3), got {raw.shape}")
+
+        distinct, kept = _drop_repeats(raw)
+        if len(distinct) < 2:
+            raise ValueError(
+                "trajectory never moves: every sample is at the same place"
+            )
+        raw_arc = _arc_lengths(distinct)
+
+        line = resample_polyline(distinct, spacing)
+        line = _smooth(line, smoothing)
+        line, _ = _drop_repeats(line)
+        line_arc = _arc_lengths(line)
+
+        # Map sample index -> arc fraction -> index on the resampled line.
+        # Going through the fraction rather than through a raw index keeps this
+        # correct however many points smoothing and deduplication removed.
+        indices: list[int] = []
+        for sample in checkpoint_samples:
+            fraction = raw_arc[kept[int(sample)]] / raw_arc[-1]
+            indices.append(
+                int(np.searchsorted(line_arc, fraction * line_arc[-1]))
+            )
+        last = len(line) - 1
+        indices = sorted({min(max(i, 1), last) for i in indices} | {last})
+
+        return cls(line, width=width, checkpoint_indices=tuple(indices), name=name)
 
     @property
     def length(self) -> float:
@@ -284,6 +359,78 @@ class ProgressTracker:
         )
         self.arc = arc
         return arc, offset
+
+
+def resample_polyline(points: np.ndarray, spacing: float) -> np.ndarray:
+    """Re-space a polyline at fixed arc intervals, keeping both endpoints.
+
+    Linear interpolation along the existing segments, so the output never
+    wanders off the input path -- which matters, because a spline fit through a
+    driven line will cut the inside of a corner the car actually took.
+    """
+    if spacing <= 0:
+        raise ValueError(f"spacing must be positive, got {spacing}")
+    path = np.asarray(points, dtype=np.float64)
+    cumulative = _arc_lengths(path)
+    total = cumulative[-1]
+    if total < spacing:
+        raise ValueError(
+            f"path is {total:.3f} m long, shorter than the {spacing} m spacing"
+        )
+    # Include the far endpoint even when the length is not a whole multiple.
+    targets = np.arange(0.0, total, spacing)
+    targets = np.append(targets, total)
+    if targets[-1] - targets[-2] < spacing * 0.5:
+        targets = np.delete(targets, -2)  # avoid a runt segment at the end
+
+    index = np.clip(np.searchsorted(cumulative, targets, side="right") - 1,
+                    0, len(path) - 2)
+    span = cumulative[index + 1] - cumulative[index]
+    local = ((targets - cumulative[index]) / span)[:, None]
+    return path[index] + local * (path[index + 1] - path[index])
+
+
+def _arc_lengths(points: np.ndarray) -> np.ndarray:
+    """Cumulative arc length at each point; ``[0]`` is always 0."""
+    steps = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    return np.concatenate([[0.0], np.cumsum(steps)])
+
+
+def _drop_repeats(
+    points: np.ndarray, tolerance: float = 1e-9
+) -> tuple[np.ndarray, np.ndarray]:
+    """Remove points coincident with their predecessor.
+
+    Returns the filtered path and, for every input index, the index it maps to
+    in that path. Necessary because :class:`Track` rejects zero-length segments,
+    and a real run has hundreds of them: the car sits still on the start line
+    for as long as the driver takes to press throttle.
+    """
+    steps = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    keep = np.concatenate([[True], steps > tolerance])
+    return points[keep], np.cumsum(keep) - 1
+
+
+def _smooth(points: np.ndarray, window: int) -> np.ndarray:
+    """Moving average along the path, with the endpoints held fixed."""
+    if window < 3:
+        return points
+    window |= 1  # an even window would shift the line half a step
+    if len(points) <= window:
+        return points
+    half = window // 2
+    padded = np.vstack(
+        [np.repeat(points[:1], half, axis=0), points,
+         np.repeat(points[-1:], half, axis=0)]
+    )
+    kernel = np.full(window, 1.0 / window)
+    smoothed = np.stack(
+        [np.convolve(padded[:, axis], kernel, mode="valid") for axis in range(3)],
+        axis=1,
+    )
+    smoothed[0] = points[0]
+    smoothed[-1] = points[-1]
+    return smoothed
 
 
 def straight_track(length: float = 200.0, spacing: float = 5.0) -> Track:

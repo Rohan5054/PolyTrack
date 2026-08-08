@@ -79,10 +79,17 @@ class SearchResult:
     n_frames_simulated: int
     best_arc: float
     history: list[float] = field(default_factory=list)
+    #: Ticks per second of the backend that produced ``frames``. PolyTrack's
+    #: 1000 is the default because a frame count only reads out as a time at all
+    #: when a frame is a millisecond; the stand-in's 60 Hz frames have to be
+    #: converted, and a result that does not carry its own rate cannot be.
+    rate: float = 1000.0
 
     @property
     def time(self) -> str:
-        return format_time(self.frames) if self.frames is not None else "--"
+        if self.frames is None:
+            return "--"
+        return format_time(round(self.frames * 1000.0 / self.rate))
 
     def summary(self) -> str:
         status = f"finished in {self.time}" if self.finished else (
@@ -189,7 +196,10 @@ class BeamSearch:
 
         best = max(beam, key=lambda c: c.score) if beam else None
         if best is None:
-            return SearchResult(None, None, False, self._rollouts, self._frames, best_arc)
+            return SearchResult(
+                None, None, False, self._rollouts, self._frames, best_arc,
+                rate=self.backend.rate,
+            )
         return self._result(best, history, finished=False)
 
     def _expand(self, parent: Candidate, action: int) -> Candidate:
@@ -267,6 +277,7 @@ class BeamSearch:
             n_frames_simulated=self._frames,
             best_arc=candidate.arc,
             history=history,
+            rate=self.backend.rate,
         )
 
     def to_tas(self, candidate: Candidate) -> TAS:
@@ -389,6 +400,7 @@ class CEMSearch:
             n_frames_simulated=self._frames,
             best_arc=float(best_score[1]) if not best_finished else 0.0,
             history=history,
+            rate=self.backend.rate,
         )
 
     def _seed_from(self, prior: TAS, confidence: float = 0.9) -> np.ndarray:
@@ -547,6 +559,7 @@ class RefinementSearch:
             n_frames_simulated=self._frames,
             best_arc=float(best_key[1]),
             history=history,
+            rate=self.backend.rate,
         )
 
     def _sequence_from(self, tas: TAS, n_blocks: int) -> np.ndarray:
