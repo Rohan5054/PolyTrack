@@ -109,9 +109,20 @@ def main(argv=None) -> int:
         iqn_config=iqn_config,
     )
 
+    history: list[dict] = []
+    elapsed_offset = 0.0
     if args.resume:
         agent = IQNAgent.load(args.resume)
-        print(f"\n  resumed from {args.resume} at {agent.steps:,} gradient steps")
+        # Carry the previous block's log forward so a run split across several
+        # sittings still plots as one curve. gradient_steps is already
+        # continuous because it lives on the agent; seconds would restart at
+        # zero without this, which makes the graph lie about the pace.
+        earlier = args.resume.parent / "history.json"
+        if earlier.exists():
+            history = json.loads(earlier.read_text())
+            elapsed_offset = history[-1]["seconds"] if history else 0.0
+        print(f"\n  resumed from {args.resume} at {agent.steps:,} gradient steps"
+              f" / {elapsed_offset / 60:.0f} min")
     else:
         agent = IQNAgent(iqn_config)
     replay = PrioritisedReplay(
@@ -135,7 +146,6 @@ def main(argv=None) -> int:
     episodes: deque = deque(maxlen=100)
     finishes = 0
     best_frames: dict[str, int] = {}
-    history: list[dict] = []
     pending_steps = 0.0
 
     try:
@@ -182,13 +192,16 @@ def main(argv=None) -> int:
 
             now = time.monotonic()
             if now - last_log >= args.log_every:
-                elapsed = now - started
+                # Two clocks: this sitting, which sets the collection rate, and
+                # the run as a whole, which is what the curve is plotted against.
+                block = now - started
+                elapsed = block + elapsed_offset
                 row = {
                     "seconds": round(elapsed, 1),
                     "gradient_steps": agent.steps,
                     "transitions": collected,
                     "buffer": len(replay),
-                    "transitions_per_second": round(collected / max(elapsed, 1e-9), 1),
+                    "transitions_per_second": round(collected / max(block, 1e-9), 1),
                     # Gradient steps actually achieved per transition. If this
                     # sits well under --replay-ratio the learner is the
                     # bottleneck, not the collectors, and most of what they
@@ -233,12 +246,16 @@ def main(argv=None) -> int:
         agent.save(out / "agent.pt")
         (out / "history.json").write_text(json.dumps(history, indent=1))
 
-    elapsed = time.monotonic() - started
-    print(f"\n  {agent.steps:,} gradient steps, {collected:,} transitions "
-          f"in {elapsed / 60:.1f} min ({collected / max(elapsed, 1e-9):.1f}/s)")
+    block = time.monotonic() - started
+    print(f"\n  this block: {collected:,} transitions in {block / 60:.1f} min "
+          f"({collected / max(block, 1e-9):.1f}/s)")
+    print(f"  total: {agent.steps:,} gradient steps over "
+          f"{(block + elapsed_offset) / 60:.0f} min")
     print(f"  {finishes} finish(es)"
           + (f": {best_frames}" if best_frames else ""))
-    print(f"  agent -> {out / 'agent.pt'}\n")
+    print(f"\n  continue with:")
+    print(f"    python scripts/train.py --workers {args.workers} "
+          f"--resume {out / 'agent.pt'}\n")
     return 0
 
 
