@@ -73,9 +73,17 @@ How the backend was built, and how to rebuild the inputs it needs:
    Emscripten hooks; only `emscripten_resize_heap` needs a real implementation.
    No Node process, no IPC.
 4. The one thing not in the JS is the collision geometry, which comes from
-   Draco-compressed `.glb` models. `tools/extract_geometry.mjs` replays the
-   game's model pipeline in real three.js and checks every part against the
-   SHA-256 the game carries for it; `tools/build_geometry.py` packs the result.
+   Draco-compressed `.glb` models. **Capture it, do not reimplement it:**
+   `tools/capture_geometry.py` serves your local copy of the client over
+   127.0.0.1 with a hook ahead of its deferred bundles and intercepts the `Init`
+   message it sends its simulation worker, which carries every part's
+   `physicsShapeVertices`. Then `tools/build_geometry.py` packs the result.
+
+   `tools/extract_geometry.mjs` reimplements the pipeline in real three.js and
+   got 185 of 186 parts bit-identical. The one it missed, 159 `StraightTilted`,
+   cost more time than everything else in Stage 0 put together — see
+   PROJECT_STATUS.md §4.6. Keep it for its checksum verification, which is what
+   localised the problem, but capture is the primary path.
 
 Two performance notes, both learned the hard way:
 
@@ -104,10 +112,10 @@ milliseconds early. The game implements this check itself — the `Verify` path 
 `simulation_worker.bundle.js` steps a recording to `targetFrames` and asserts
 `hasFinished && frames == targetFrames` — and `polytrack/verify.py` mirrors it.
 
-**The gate passes.** Six real runs across Summer 1, Summer 5 and Desert 3 —
-played in the game, read out of its local storage — replay here and land on
-their recorded finish frame to the millisecond, up to a 61,428-tick run. Winter
-5 is the one track that still fails; see PROJECT_STATUS.md §4.6.
+**The gate passes, 8 of 8.** Real runs across Summer 1, Summer 5, Desert 3 and
+Winter 5 — played in the game, read out of its local storage — replay here and
+land on their recorded finish frame to the millisecond, up to a 61,428-tick run.
+Stage 0 is complete.
 
 An oracle is a recording *paired with the finish frame the real game recorded
 for it*. A recording alone will not do: it ends when the last key is released,
@@ -177,6 +185,13 @@ stretch of track and farms reward forever.
 **Search output must replay identically.** A reported time that cannot be
 reproduced from the reported inputs is worthless. Tested at every layer, and it
 is the same check to run against the real game.
+
+**The size of a geometry error is no guide to the size of its consequences.**
+Part 159's collision mesh was wrong by 1.8e-4 — invisible, and drivable at
+308 km/h. It still threw a 400 km/h wall-ride clean off the track thirteen
+seconds later, and Winter 5 was the only one of four tracks it broke. Do not
+wave away small numeric differences in the world model; the gate is the only
+thing that can tell you whether one matters.
 
 **Everything is frame-indexed, never time-indexed.** Wall-clock never enters the
 simulation. This is what makes runs reproducible — and what made the existing
