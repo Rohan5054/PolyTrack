@@ -40,6 +40,12 @@ from polytrack.library import TrackLibrary
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--library", type=Path, default=Path("tracks.npz"))
+    parser.add_argument(
+        "--track", action="append", default=None, metavar="NAME",
+        help="train on this track only; repeat for several. Four tracks split "
+             "the data four ways, so one track gets four times the episodes -- "
+             "worth it while the question is still whether it can get round",
+    )
     parser.add_argument("--name", default=time.strftime("run-%Y%m%d-%H%M%S"))
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument(
@@ -96,6 +102,8 @@ def main(argv=None) -> int:
         print("  POLYTRACK_TRACKS=... python scripts/build_library.py")
         return 2
     library = TrackLibrary.load(args.library)
+    if args.track:
+        library = library.select(args.track)
 
     out = Path("runs") / args.name
     out.mkdir(parents=True, exist_ok=True)
@@ -103,6 +111,7 @@ def main(argv=None) -> int:
     iqn_config = IQNConfig(lr=args.lr, gamma=args.gamma)
     collector_config = CollectorConfig(
         library_path=str(args.library.resolve()),
+        track_names=tuple(args.track or ()),
         control_interval_ms=args.control_interval_ms,
         n_step=args.n_step,
         gamma=args.gamma,
@@ -137,6 +146,12 @@ def main(argv=None) -> int:
 
     pool = CollectorPool(args.workers, collector_config)
     pool.start()
+    # Immediately, and before any collection. A worker builds its own network
+    # from scratch and only replaces it when the learner broadcasts -- which
+    # does not happen until the buffer holds --learn-after transitions. On a
+    # resumed run that means the first ~100 seconds are driven by a random
+    # policy and land in the buffer as if they meant something.
+    pool.broadcast(agent.weights())
 
     started_steps = agent.steps
     started = time.monotonic()

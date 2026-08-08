@@ -48,6 +48,8 @@ class CollectorConfig:
     """Everything a worker needs, in a form that survives pickling."""
 
     library_path: str = "tracks.npz"
+    #: Restrict training to these tracks. Empty means all of them.
+    track_names: tuple[str, ...] = ()
     geometry_path: str | None = None
     wasm_path: str | None = None
     control_interval_ms: float = 50.0
@@ -124,6 +126,8 @@ def collector_process(
 
         assets = GeometryAssets.load(config.geometry_path)
         library = TrackLibrary.load(config.library_path)
+        if config.track_names:
+            library = library.select(config.track_names)
         agent = IQNAgent(config.iqn_config)
         epsilon = worker_epsilon(index, n_workers, config)
 

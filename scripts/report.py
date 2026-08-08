@@ -132,7 +132,7 @@ def _exploit_check(history: list[dict]) -> None:
               "before spending more hours.")
 
 
-def evaluate(run: Path, library_path: Path) -> None:
+def evaluate(run: Path, library_path: Path, only=None) -> None:
     """Drive every track with the checkpoint, greedily. The real answer."""
     from polytrack.env import PolyTrackEnv
     from polytrack.learning.iqn import IQNAgent
@@ -151,6 +151,8 @@ def evaluate(run: Path, library_path: Path) -> None:
     torch.set_num_threads(2)
     agent = IQNAgent.load(checkpoint)
     library = TrackLibrary.load(library_path)
+    if only:
+        library = library.select(only)
     assets = GeometryAssets.load()
 
     print(f"\n  Greedy evaluation at {agent.steps:,} gradient steps "
@@ -183,6 +185,8 @@ def main() -> int:
     parser.add_argument("--eval", action="store_true",
                         help="load the checkpoint and drive each track greedily")
     parser.add_argument("--library", type=Path, default=Path("tracks.npz"))
+    parser.add_argument("--track", action="append", default=None, metavar="NAME",
+                        help="evaluate only this track; repeat for several")
     parser.add_argument("--rows", type=int, default=10)
     args = parser.parse_args()
 
@@ -211,7 +215,7 @@ def main() -> int:
     verdict(history)
 
     if args.eval:
-        evaluate(run, args.library)
+        evaluate(run, args.library, args.track)
     else:
         print("\n  --eval loads the checkpoint and drives each track greedily, "
               "which is the\n  only honest measure of what it can do. Costs a "

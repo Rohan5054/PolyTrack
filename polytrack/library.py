@@ -82,6 +82,30 @@ class TrackLibrary:
     def __getitem__(self, index: int) -> TrackEntry:
         return self.entries[index]
 
+    def select(self, names) -> "TrackLibrary":
+        """A sub-library of the named tracks, in the order given.
+
+        Training on one track rather than four gives each four times the
+        episodes, which is the right trade while the question is still "can it
+        get round at all". It is the wrong trade for generalisation, but four
+        tracks does not buy that either -- only the procedural generator does.
+
+        Matching is case-insensitive and ignores spaces, so ``winter5`` finds
+        ``Winter 5``.
+        """
+        def key(text: str) -> str:
+            return "".join(text.split()).lower()
+
+        index = {key(entry.name): entry for entry in self.entries}
+        chosen = []
+        for name in names:
+            entry = index.get(key(name))
+            if entry is None:
+                available = ", ".join(e.name for e in self.entries)
+                raise LibraryError(f"no track named {name!r} ({available})")
+            chosen.append(entry)
+        return TrackLibrary(chosen)
+
     def by_name(self, name: str) -> TrackEntry:
         for entry in self.entries:
             if entry.name == name:
