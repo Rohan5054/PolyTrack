@@ -44,14 +44,87 @@ mimetypes.add_type("application/wasm", ".wasm")
 mimetypes.add_type("model/gltf-binary", ".glb")
 mimetypes.add_type("application/javascript", ".js")
 
-#: Installs the record before the game's bundles run, and severs the upload
-#: path. ``__RECORDS__`` is substituted with a list of key/value pairs.
+#: Installs the record and severs the upload path. ``__RECORDS__`` becomes a
+#: list of ``{trackId, frames, recording}``.
+#:
+#: The record cannot simply be written: ``loadRecord`` in main.bundle.js reads
+#: ``tokenHash`` out of the stored JSON and returns null unless it equals the
+#: *current profile's* hash, which is ``sha256(profile.token)`` over a token the
+#: game generates randomly on first boot. So the hook has to wait for the
+#: profile to exist, read its token, and derive the hash -- js-sha256 emits
+#: lowercase hex of the UTF-8 bytes, which is exactly what crypto.subtle gives.
+#: 127.0.0.1 counts as a secure context, so subtle is available.
 HOOK = """
 <script>
 (function () {
   var records = __RECORDS__;
-  records.forEach(function (r) {
-    try { localStorage.setItem(r.key, r.value); } catch (e) {}
+  var PREFIX = 'polytrack_v5_prod_';
+
+  function hex(buffer) {
+    return Array.from(new Uint8Array(buffer))
+      .map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  function install() {
+    var slotRaw, slot, profileRaw, token;
+    try {
+      slotRaw = localStorage.getItem(PREFIX + 'user_slot');
+      slot = slotRaw == null ? 0 : JSON.parse(slotRaw);
+      profileRaw = localStorage.getItem(PREFIX + 'user_' + slot);
+      if (!profileRaw) return Promise.resolve(false);
+      token = JSON.parse(profileRaw).token;
+      if (typeof token !== 'string' || !token.length) return Promise.resolve(false);
+    } catch (e) { return Promise.resolve(false); }
+
+    return crypto.subtle
+      .digest('SHA-256', new TextEncoder().encode(token))
+      .then(function (digest) {
+        var tokenHash = hex(digest);
+        records.forEach(function (r) {
+          var value = JSON.stringify({
+            uploadId: null, tokenHash: tokenHash,
+            frames: r.frames, recording: r.recording
+          });
+          // Both determinism buckets: which one the game reads depends on its
+          // own self-test, and writing the other costs nothing.
+          ['default', 'undeterministic'].forEach(function (kind) {
+            try {
+              localStorage.setItem(
+                PREFIX + 'record_' + slot + '_' + kind + '_' + r.trackId, value
+              );
+            } catch (e) {}
+          });
+        });
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
+  function attempt(tries) {
+    return install().then(function (ok) {
+      if (ok) return true;
+      if (tries <= 0) return false;
+      return new Promise(function (resolve) {
+        setTimeout(function () { resolve(attempt(tries - 1)); }, 200);
+      });
+    });
+  }
+
+  attempt(150).then(function (ok) {
+    if (!ok) {
+      banner('Could not install the run: the game never created a profile.',
+             '#b91c1c');
+      return;
+    }
+    // The profile did not exist on a first visit, so the game booted without
+    // the record. One reload and it starts with it already in place.
+    if (!sessionStorage.getItem('watch_run_reloaded')) {
+      sessionStorage.setItem('watch_run_reloaded', '1');
+      location.reload();
+      return;
+    }
+    banner('Agent run installed \\u2014 open the track and it is the record. '
+           + 'Uploads are blocked; this is not your real save.', '#1d4ed8');
   });
 
   // Bot runs do not go on the human leaderboard. A fresh origin has no session
@@ -75,19 +148,20 @@ HOOK = """
     return open0.apply(this, arguments);
   };
 
-  function banner() {
-    var d = document.createElement('div');
-    d.textContent = 'Agent run installed \\u2014 open the track and watch the '
-      + 'replay. Uploads are blocked; this is not your real save.';
-    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
-      + 'padding:10px;background:#1d4ed8;color:#fff;'
-      + 'font:600 14px system-ui,sans-serif;text-align:center';
-    (document.body || document.documentElement).appendChild(d);
-    setTimeout(function () { d.remove(); }, 12000);
+  function banner(text, colour) {
+    function show() {
+      var d = document.createElement('div');
+      d.textContent = text;
+      d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
+        + 'padding:10px;background:' + colour + ';color:#fff;'
+        + 'font:600 14px system-ui,sans-serif;text-align:center';
+      (document.body || document.documentElement).appendChild(d);
+      setTimeout(function () { d.remove(); }, 15000);
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', show);
+    } else { show(); }
   }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', banner);
-  } else { banner(); }
 })();
 </script>
 """
@@ -191,7 +265,6 @@ def main() -> int:
         help="directory with index.html from your app.asar. Without it the run "
              "is exported to files and nothing is served",
     )
-    parser.add_argument("--slot", type=int, default=0)
     parser.add_argument("--out", type=Path, default=Path("runs/exported"))
     parser.add_argument("--port", type=int, default=8732)
     parser.add_argument("--no-browser", action="store_true")
@@ -219,13 +292,13 @@ def main() -> int:
         print(f"\n  no index.html in {args.game}")
         return 2
 
-    key = f"polytrack_v5_prod_record_{args.slot}_default_{run['track_id']}"
-    value = json.dumps({
-        "uploadId": None,          # never uploaded, and never will be
+    # The key needs the profile slot and the tokenHash, neither of which exists
+    # until the game boots, so the hook assembles it in the browser.
+    hook = HOOK.replace("__RECORDS__", json.dumps([{
+        "trackId": run["track_id"],
         "frames": run["frames"],
         "recording": run["recording"],
-    })
-    hook = HOOK.replace("__RECORDS__", json.dumps([{"key": key, "value": value}]))
+    }]))
 
     server = ThreadingHTTPServer(
         ("127.0.0.1", args.port), build_handler(args.game, hook)
