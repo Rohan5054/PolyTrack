@@ -86,6 +86,13 @@ class EpisodeStats:
     #: dominates says a great deal: all ``off_line`` means the car cannot hold
     #: the track, all ``stalled`` means it cannot get off the line.
     failure: str
+    #: The inputs, in PolyTrack's own recording format, for episodes that
+    #: finished. Without this a record lap is a number in a log and nothing
+    #: else -- the run that produced it is gone the moment the episode ends,
+    #: and no ghost of it can ever be built. Encoded in the worker because the
+    #: format is run-length coded: a 19-second lap is a couple of hundred bytes
+    #: rather than 19,000 integers down a queue.
+    recording: str | None = None
 
     @property
     def fraction(self) -> float:
@@ -119,6 +126,7 @@ def collector_process(
         from ..library import TrackLibrary
         from ..physics.assets import GeometryAssets
         from ..physics.wasm import WasmPhysics
+        from ..recording import Recording
         from .replay import NStepAccumulator
 
         np.random.seed(1000 + index)
@@ -199,6 +207,7 @@ def collector_process(
                     if latest is not None:
                         agent.load_weights(latest)
 
+            finished = bool(info.get("finished", False))
             stats.put(
                 EpisodeStats(
                     worker=index,
@@ -208,9 +217,16 @@ def collector_process(
                     reward=total_reward,
                     arc=float(info.get("arc", 0.0)),
                     track_length=entry.line.length,
-                    finished=bool(info.get("finished", False)),
+                    finished=finished,
                     epsilon=epsilon,
                     failure=str(info.get("failure", "timeout")),
+                    # Only for laps that completed: everything else is not a
+                    # run anyone would want to watch, and encoding costs time
+                    # the collector should spend driving.
+                    recording=(
+                        Recording.from_masks(env.input_masks).serialize()
+                        if finished else None
+                    ),
                 )
             )
             episode += 1

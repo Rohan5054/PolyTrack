@@ -167,15 +167,25 @@ HOOK = """
 """
 
 
-def drive(checkpoint: Path, library_path: Path, track_name: str) -> dict:
-    """Drive one track greedily and return a verified recording of it."""
+def drive(
+    checkpoint: Path, library_path: Path, track_name: str, attempts: int = 1
+) -> dict:
+    """Drive a track greedily ``attempts`` times and keep the fastest lap.
+
+    Repeating is not pointless even with exploration switched off. IQN samples
+    fresh quantile fractions on every forward pass, so the action is a
+    stochastic estimate of the argmax and two greedy laps are not the same lap;
+    measured spread on Winter 5 is around a tenth of a second. Best-of-N is
+    therefore a real, if modest, improvement, and it is what you would do before
+    submitting a time anyway.
+    """
     from polytrack.env import PolyTrackEnv
     from polytrack.learning.iqn import IQNAgent
     from polytrack.library import TrackLibrary
     from polytrack.physics.assets import GeometryAssets
     from polytrack.physics.wasm import WasmPhysics
     from polytrack.recording import Recording
-    from polytrack.tas import format_time
+    from polytrack.tas import TAS, format_time
     from polytrack.verify import verify
 
     import torch
@@ -192,22 +202,40 @@ def drive(checkpoint: Path, library_path: Path, track_name: str) -> dict:
         time_limit_ms=entry.par_frames * 3,
         par_frames=entry.par_frames,
     )
-    observation, _ = env.reset()
-    info: dict = {}
-    while True:
-        observation, _, terminated, truncated, info = env.step(
-            agent.act(observation, epsilon=0.0)
-        )
-        if terminated or truncated:
-            break
 
-    finished = bool(info.get("finished"))
-    frames = env.elapsed_frames
-    recording = Recording.from_masks(env.input_masks)
+    best: dict | None = None
+    for attempt in range(attempts):
+        observation, _ = env.reset()
+        info: dict = {}
+        while True:
+            observation, _, terminated, truncated, info = env.step(
+                agent.act(observation, epsilon=0.0)
+            )
+            if terminated or truncated:
+                break
 
-    print(f"  {entry.name}: {format_time(frames)} "
-          f"({'finished' if finished else info.get('failure', 'did not finish')}), "
-          f"par {format_time(entry.par_frames)}")
+        finished = bool(info.get("finished"))
+        frames = env.elapsed_frames
+        outcome = "finished" if finished else info.get("failure", "did not finish")
+        marker = ""
+        if finished and (best is None or frames < best["frames"]):
+            best = {"frames": frames, "masks": list(env.input_masks)}
+            marker = "  <- best"
+        print(f"    attempt {attempt + 1}/{attempts}: {format_time(frames)} "
+              f"({outcome}){marker}")
+
+    if best is None:
+        print(f"\n  {entry.name}: no attempt finished.")
+        return {"track_id": entry.track_code().track_id, "name": entry.name,
+                "frames": 0, "finished": False, "recording": "", "tas": ""}
+
+    frames = best["frames"]
+    finished = True
+    recording = Recording.from_masks(best["masks"])
+    tas_text = TAS.from_frame_masks(best["masks"]).to_text()
+
+    print(f"\n  {entry.name}: {format_time(frames)} of "
+          f"{attempts} attempt(s), par {format_time(entry.par_frames)}")
 
     # A ghost that does not reproduce is not the run. Same check as the gate.
     if finished:
@@ -226,7 +254,48 @@ def drive(checkpoint: Path, library_path: Path, track_name: str) -> dict:
         "frames": frames,
         "finished": finished,
         "recording": recording.serialize(),
-        "tas": env.export_tas().to_text(),
+        "tas": tas_text,
+    }
+
+
+def load_saved(path: Path, library_path: Path, track_name: str) -> dict:
+    """Install a record lap the trainer saved, rather than driving a new one.
+
+    This is the real thing -- the exact inputs of the episode that set the
+    record, not a re-drive that happens to be about as quick. It is still put
+    through the gate, because a stored recording that does not reproduce would
+    install a ghost of a run that never happened.
+    """
+    from polytrack.library import TrackLibrary
+    from polytrack.physics.assets import GeometryAssets
+    from polytrack.physics.wasm import WasmPhysics
+    from polytrack.recording import Recording
+    from polytrack.tas import TAS, format_time
+    from polytrack.verify import verify
+
+    saved = json.loads(path.read_text())
+    entry = TrackLibrary.load(library_path).by_name(track_name)
+    recording = Recording.deserialize(saved["recording"])
+    frames = int(saved["frames"])
+
+    print(f"  {saved['track']}: {format_time(frames)} from {path.name} "
+          f"(set at {saved.get('gradient_steps', '?')} gradient steps, "
+          f"eps {saved.get('epsilon', 0):.3f})")
+
+    assets = GeometryAssets.load()
+    result = verify(WasmPhysics(entry.track_code(), assets=assets),
+                    recording, frames)
+    print(f"  replay check: {result.describe()}")
+    if not result.passed:
+        raise SystemExit("the saved recording does not reproduce its own time")
+
+    return {
+        "track_id": entry.track_code().track_id,
+        "name": entry.name,
+        "frames": frames,
+        "finished": True,
+        "recording": saved["recording"],
+        "tas": TAS.from_frame_masks(list(recording.masks(frames))).to_text(),
     }
 
 
@@ -257,8 +326,21 @@ def build_handler(root: Path, hook: str):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("checkpoint", type=Path)
+    parser.add_argument(
+        "checkpoint", type=Path, nargs="?", default=None,
+        help="an agent.pt to drive with. Omit when using --from-best",
+    )
     parser.add_argument("--track", required=True)
+    parser.add_argument(
+        "--attempts", type=int, default=1,
+        help="drive this many greedy laps and install the fastest. Greedy is "
+             "not deterministic -- IQN samples quantiles per forward pass",
+    )
+    parser.add_argument(
+        "--from-best", type=Path, default=None, metavar="JSON",
+        help="install a best_<track>.json saved during training instead of "
+             "driving. This is the actual record lap, inputs and all",
+    )
     parser.add_argument("--library", type=Path, default=Path("tracks.npz"))
     parser.add_argument(
         "--game", type=Path, default=None,
@@ -270,7 +352,14 @@ def main() -> int:
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
-    run = drive(args.checkpoint, args.library, args.track)
+    if args.from_best:
+        run = load_saved(args.from_best, args.library, args.track)
+    elif args.checkpoint:
+        run = drive(args.checkpoint, args.library, args.track, args.attempts)
+    else:
+        print("give a checkpoint to drive with, or --from-best to install a "
+              "lap saved during training")
+        return 2
 
     args.out.mkdir(parents=True, exist_ok=True)
     stem = run["name"].replace(" ", "_").lower()

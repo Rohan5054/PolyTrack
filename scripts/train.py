@@ -120,6 +120,7 @@ def main(argv=None) -> int:
 
     history: list[dict] = []
     elapsed_offset = 0.0
+    resumed_best: dict[str, int] = {}
     if args.resume:
         agent = IQNAgent.load(args.resume)
         # Carry the previous block's log forward so a run split across several
@@ -130,6 +131,15 @@ def main(argv=None) -> int:
         if earlier.exists():
             history = json.loads(earlier.read_text())
             elapsed_offset = history[-1]["seconds"] if history else 0.0
+            # Best times have to come forward too. Restarting the tracking each
+            # block made the reported best jump back up whenever a block's first
+            # finish was slower than an earlier block's -- so the headline number
+            # was not the best at all, just the best since the last Ctrl+C.
+            for row in history:
+                for name, seconds in (row.get("best") or {}).items():
+                    frames = int(round(seconds * 1000))
+                    if frames < resumed_best.get(name, 1 << 62):
+                        resumed_best[name] = frames
         print(f"\n  resumed from {args.resume} at {agent.steps:,} gradient steps"
               f" / {elapsed_offset / 60:.0f} min")
     else:
@@ -160,7 +170,7 @@ def main(argv=None) -> int:
     losses: deque = deque(maxlen=200)
     episodes: deque = deque(maxlen=100)
     finishes = 0
-    best_frames: dict[str, int] = {}
+    best_frames: dict[str, int] = dict(resumed_best)
     pending_steps = 0.0
 
     try:
@@ -186,6 +196,18 @@ def main(argv=None) -> int:
                         print(f"    * {item.track}: finished in "
                               f"{item.frames / 1000:.3f} s "
                               f"(worker {item.worker}, eps {item.epsilon:.3f})")
+                        # Keep the run, not just the number. Without this a
+                        # record lap exists only as a line in a log and can
+                        # never be watched or verified.
+                        if item.recording:
+                            stem = item.track.replace(" ", "_").lower()
+                            (out / f"best_{stem}.json").write_text(json.dumps({
+                                "track": item.track,
+                                "frames": item.frames,
+                                "recording": item.recording,
+                                "gradient_steps": agent.steps,
+                                "epsilon": item.epsilon,
+                            }, indent=1))
 
             if len(replay) >= args.learn_after and pending_steps >= 1.0:
                 for _ in range(int(min(pending_steps, 64))):
