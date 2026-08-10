@@ -48,8 +48,12 @@ def curve(history: list[dict], rows: int = 10) -> None:
     spark = "".join(blocks[min(int(v / peak * 9), 9)] for v in laps[::step])
 
     print(f"  lap  {spark}  (peak {peak:.3f})\n")
+    # "fastest", not "best": these two columns are the median and minimum of the
+    # last hundred episodes, so they move in both directions and are nothing to
+    # do with the all-time record printed above. Reading one as the other makes
+    # a run that is improving look like it went backwards a second.
     print("      time    steps   trans/s  ratio      lap   greedy   fin%"
-          "   median     best   failures")
+          "   median  fastest   failures")
     for r in sample:
         greedy = r.get("greedy_fraction")
         # Runs started before a column existed simply do not have it.
@@ -218,7 +222,8 @@ def main() -> int:
           f"steps, {last['transitions']:,} transitions, "
           f"{last.get('finishes', 0)} finish(es)")
     if last.get("best"):
-        print(f"  best: {last['best']}")
+        print(f"  record: {last['best']}   (all-time; the table's two time "
+              "columns are the last 100 episodes)")
     print()
     curve(history, args.rows)
     verdict(history)

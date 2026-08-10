@@ -372,7 +372,7 @@ def main(argv=None) -> int:
                     f"(greedy {row['greedy_fraction'] if row['greedy_fraction'] is not None else '--':>5}) | "
                     f"fin {row['finish_rate'] * 100:>3.0f}% "
                     f"{row['finish_median'] if row['finish_median'] is not None else '--':>6} "
-                    f"med / {row['finish_best'] if row['finish_best'] is not None else '--':>6} best | "
+                    f"med / {row['finish_best'] if row['finish_best'] is not None else '--':>6} fastest | "
                     f"{row['episodes']} eps {row['failures']}"
                 )
                 (out / "history.json").write_text(json.dumps(history, indent=1))
