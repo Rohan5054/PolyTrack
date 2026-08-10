@@ -227,6 +227,7 @@ def main(argv=None) -> int:
     collected = 0
     last_log_steps = agent.steps
     last_log_collected = 0
+    last_broadcast = agent.steps
     losses: deque = deque(maxlen=200)
     episodes: deque = deque(maxlen=100)
     finishes = 0
@@ -280,7 +281,16 @@ def main(argv=None) -> int:
                     pending_steps -= 1.0
                     if agent.steps % max(args.checkpoint_every, 1) == 0:
                         agent.save(out / "agent.pt")
-                if agent.steps % 200 == 0:
+                # Compared against the last broadcast, not tested for divisibility.
+                # The inner loop advances ``steps`` by up to 64 at a time and this
+                # runs once afterwards, so ``steps % 200 == 0`` was only ever true
+                # when a multiple of 64 happened to land on a multiple of 200 --
+                # every 1600 steps rather than every 200. Under a thermally
+                # throttled learner doing 4.5 steps/s that is a six-minute-old
+                # policy in every collector, so the buffer fills with exploration
+                # from a network the learner has long since moved past.
+                if agent.steps - last_broadcast >= 200:
+                    last_broadcast = agent.steps
                     pool.broadcast(agent.weights())
             else:
                 # Nothing to learn from yet, or the collectors are behind. This
