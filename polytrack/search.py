@@ -55,6 +55,10 @@ class Candidate:
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))
     finished: bool = False
     terminated: bool = False
+    #: Full car state and offset from the line, kept only so an action prior can
+    #: be asked what to try from here. ``None`` when no prior is in use.
+    state: object | None = None
+    lateral: float = 0.0
 
     @property
     def score(self) -> tuple[int, float]:
@@ -114,6 +118,14 @@ class BeamSearch:
             hopeless (9^N), while holding for ~6 frames (0.1 s) makes a
             10-second run about 100 decisions.
         actions: Restrict the action set if you know some are never useful.
+        prior: ``f(state, arc, lateral) -> array of N_ACTIONS values``, highest
+            first. A trained policy, normally. Only the ``top_k`` best-rated
+            actions are expanded from each parent, which is what makes the full
+            nine-action space affordable: the branching factor stops being a
+            property of the game and becomes a parameter.
+        top_k: How many of the prior's suggestions to expand. Ignored without a
+            prior. Keep it above one -- at one the search only ever replays the
+            policy, and the whole point is to look where the policy would not.
     """
 
     def __init__(
@@ -126,6 +138,8 @@ class BeamSearch:
         dedup_position: float = 1.0,
         dedup_velocity: float = 2.0,
         window: float = 60.0,
+        prior: Callable | None = None,
+        top_k: int = 3,
     ) -> None:
         self.backend = backend
         self.track = track
@@ -135,6 +149,8 @@ class BeamSearch:
         self.dedup_position = dedup_position
         self.dedup_velocity = dedup_velocity
         self.window = window
+        self.prior = prior
+        self.top_k = max(1, int(top_k))
         self._rollouts = 0
         self._frames = 0
 
@@ -154,7 +170,7 @@ class BeamSearch:
         self._frames = 0
 
         state = self.backend.reset()
-        arc, _ = self.track.project(state.position)
+        arc, lateral = self.track.project(state.position)
         beam = [
             Candidate(
                 blob=self.backend.save_state(),
@@ -164,6 +180,8 @@ class BeamSearch:
                 actions=(),
                 position=state.position.copy(),
                 velocity=state.velocity.copy(),
+                state=state,
+                lateral=lateral,
             )
         ]
         history: list[float] = []
@@ -171,23 +189,39 @@ class BeamSearch:
         max_depth = max_frames // self.block_frames
 
         for depth in range(max_depth):
-            children: list[Candidate] = []
-            for parent in beam:
-                for action in self.actions:
-                    child = self._expand(parent, action)
-                    if child.terminated:
+            # Two passes over the depth, because a saved state is 24 MB against
+            # 14 ms to make one. Scoring every child with its blob attached would
+            # hold beam_width * len(actions) of them at once -- 3.5 GB at the
+            # default width -- so pass one keeps only the numbers, and pass two
+            # re-runs the survivors to materialise their states. That costs one
+            # extra block of simulation per surviving candidate, about a third
+            # more, and takes peak memory from 4x the beam to 2x.
+            scored: list[tuple[Candidate, int, int]] = []
+            finishers: list[tuple[int, int, int]] = []
+            for index, parent in enumerate(beam):
+                for action in self._actions_from(parent):
+                    outcome = self._simulate(parent, action)
+                    if outcome.terminated:
                         continue
-                    if child.finished:
-                        # First finisher wins: identical frame budget across
-                        # the whole depth means nothing still in the beam can
-                        # do better without searching another depth.
-                        return self._result(child, history, finished=True)
-                    children.append(child)
+                    if outcome.finished:
+                        finishers.append((outcome.frame, index, action))
+                        continue
+                    scored.append((outcome, index, action))
 
-            if not children:
+            if finishers:
+                # The earliest finisher in the depth, not the first one found.
+                # Candidates cross the line at different frames *within* a block,
+                # so "first expanded" is an ordering accident worth up to a whole
+                # block -- 50 ms, which is more than the margin these searches
+                # are run to find.
+                _, index, action = min(finishers)
+                winner = self._materialise(beam[index], action)
+                return self._result(winner, history, finished=True)
+
+            if not scored:
                 break
 
-            beam = self._prune(children)
+            beam = self._prune_scored(scored, beam)
             best = beam[0]
             best_arc = max(best_arc, best.arc)
             history.append(best.arc)
@@ -202,26 +236,42 @@ class BeamSearch:
             )
         return self._result(best, history, finished=False)
 
-    def _expand(self, parent: Candidate, action: int) -> Candidate:
-        """Run one block of frames from a parent state with one held action."""
+    def _actions_from(self, parent: Candidate) -> tuple[int, ...]:
+        """Which actions to expand from here -- all of them, or the prior's best."""
+        if self.prior is None or parent.state is None:
+            return self.actions
+        values = np.asarray(
+            self.prior(parent.state, parent.arc, parent.lateral), dtype=np.float64
+        )
+        # Restricted actions come back as -inf from a masked agent, and argsort
+        # would happily rank them; drop them rather than letting the search
+        # expand a branch the policy has never valued.
+        allowed = [a for a in self.actions if np.isfinite(values[a])]
+        if not allowed:
+            return self.actions
+        allowed.sort(key=lambda a: values[a], reverse=True)
+        return tuple(allowed[: self.top_k])
+
+    def _simulate(self, parent: Candidate, action: int) -> Candidate:
+        """One block from a parent state, scored but with no state saved.
+
+        ``blob`` is deliberately empty. This is the hot path -- ``beam_width``
+        times ``top_k`` calls per depth -- and saving a state it will almost
+        certainly throw away is the single most expensive thing the search could
+        do.
+        """
         self.backend.load_state(parent.blob)
-        mask = ACTION_TO_MASK[action]
-        result = None
-        for _ in range(self.block_frames):
-            result = self.backend.step(mask)
-            self._frames += 1
-            if result.finished or result.terminated:
-                break
+        result = self.backend.step_many(ACTION_TO_MASK[action], self.block_frames)
+        self._frames += result.state.frame - parent.frame
         self._rollouts += 1
 
-        assert result is not None
         # Project relative to the parent's arc: each branch tracks its own
         # progress, which is what makes this correct on looping tracks.
-        arc, _ = self.track.project(
+        arc, lateral = self.track.project(
             result.state.position, near_arc=parent.arc, radius=self.window
         )
         return Candidate(
-            blob=self.backend.save_state(),
+            blob=b"",
             frame=result.state.frame,
             checkpoint=result.state.checkpoint,
             arc=arc,
@@ -230,28 +280,46 @@ class BeamSearch:
             velocity=result.state.velocity.copy(),
             finished=result.finished,
             terminated=result.terminated,
+            state=result.state,
+            lateral=lateral,
         )
 
-    def _prune(self, children: list[Candidate]) -> list[Candidate]:
-        """Keep the best candidates, discarding near-duplicate states.
+    def _materialise(self, parent: Candidate, action: int) -> Candidate:
+        """Re-run a surviving child and keep its state this time.
 
-        Deduplication matters more than beam width here. Without it the beam
-        fills with dozens of trajectories that reached effectively the same
-        place at the same speed by trivially different routes, and the search
-        explores one narrow corridor instead of genuinely different lines.
+        Sound only because the backend is deterministic: the same block from the
+        same restored state must produce the same result it produced in the
+        scoring pass. That is the same property the acceptance gate checks, and
+        if it ever stopped holding this search would be the least of it.
         """
-        children.sort(key=lambda c: c.score, reverse=True)
-        kept: list[Candidate] = []
+        child = self._simulate(parent, action)
+        child.blob = self.backend.save_state()
+        return child
+
+    def _prune_scored(
+        self, scored: list[tuple[Candidate, int, int]], beam: list[Candidate]
+    ) -> list[Candidate]:
+        """Pick the survivors from blob-less probes, then re-run only those.
+
+        Deduplication needs a state fingerprint, and pass one did keep one --
+        position and velocity are a handful of floats, unlike the 24 MB blob --
+        Deduplication matters more than beam width does. Without it the beam
+        fills with dozens of trajectories that reached effectively the same place
+        at the same speed by trivially different routes, and the search explores
+        one narrow corridor instead of genuinely different lines.
+        """
+        scored.sort(key=lambda item: item[0].score, reverse=True)
+        chosen: list[tuple[int, int]] = []
         seen: set[tuple] = set()
-        for child in children:
-            key = self._bucket(child)
+        for probe, index, action in scored:
+            key = self._bucket(probe)
             if key in seen:
                 continue
             seen.add(key)
-            kept.append(child)
-            if len(kept) >= self.beam_width:
+            chosen.append((index, action))
+            if len(chosen) >= self.beam_width:
                 break
-        return kept
+        return [self._materialise(beam[i], a) for i, a in chosen]
 
     def _bucket(self, candidate: Candidate) -> tuple:
         """Coarse state fingerprint used for deduplication.
