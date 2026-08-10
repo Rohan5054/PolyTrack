@@ -32,7 +32,7 @@ Three implementation choices worth naming:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 
 import numpy as np
 import torch
@@ -75,6 +75,26 @@ class IQNConfig:
     kappa: float = 1.0  # Huber transition point
     grad_clip: float = 10.0
     target_update_every: int = 1000
+    #: Restrict the policy to a subset of the nine actions. ``None`` is all of
+    #: them. This is a *constraint*, not a reward term: if you are confident an
+    #: action is never correct on a track, removing it costs nothing and shrinks
+    #: the credit-assignment problem, whereas paying the agent not to use it sets
+    #: up a tug of war with lap time and needs a coefficient nobody can tune.
+    #:
+    #: It is deliberately not a reward: see the non-negativity rule in CLAUDE.md.
+    #:
+    #: Restricting is only sound where the evidence says so, and the evidence is
+    #: per track. Measured over the human records in ``records.json``: the 19.025
+    #: Winter 5 lap holds throttle for 100.0% of its frames and never brakes,
+    #: while the 21.899 lap on the same track lifts for 12% and is 2.9 s slower.
+    #: Every other track brakes for 8-21% of the lap, so forward-only would make
+    #: them unfinishable. Set this per run, on a run that trains one track.
+    #:
+    #: Lives on the config rather than on the agent so that it travels: into the
+    #: collector processes with ``CollectorConfig.iqn_config``, and into the
+    #: checkpoint, so ``report.py --eval`` and ``watch_run.py`` drive under the
+    #: same restriction the policy was trained under without being told.
+    allowed_actions: tuple[int, ...] | None = None
 
 
 class IQNNetwork(nn.Module):
@@ -164,6 +184,40 @@ def quantile_huber_loss(
     return (weight * huber / kappa).sum(dim=2).mean(dim=1)
 
 
+def _upgrade_config(config: IQNConfig) -> IQNConfig:
+    """Rebuild a config unpickled from an older checkpoint.
+
+    ``IQNConfig`` is ``slots=True``, so pickle stores exactly the slots that
+    existed when it was written and ``object.__setstate__`` sets exactly those
+    back. A field added later is not merely defaulted -- its slot is *unset*, and
+    reading it raises ``AttributeError`` from somewhere far away. Filling the
+    gaps from the current defaults here means a checkpoint keeps loading across
+    any future field that has one, which matters because these runs are hundreds
+    of thousands of gradient steps and there is no way to regenerate them.
+    """
+    return IQNConfig(
+        **{f.name: getattr(config, f.name, f.default) for f in fields(IQNConfig)}
+    )
+
+
+def _action_restriction(config: IQNConfig, device) -> tuple:
+    """``(allowed indices, blocked bool mask)``, or ``(None, None)`` if free."""
+    allowed = config.allowed_actions
+    if allowed is None:
+        return None, None
+    indices = sorted(set(int(a) for a in allowed))
+    if not indices:
+        raise ValueError("allowed_actions is empty: the policy could not act")
+    if indices[0] < 0 or indices[-1] >= config.n_actions:
+        raise ValueError(
+            f"allowed_actions {tuple(indices)} out of range for "
+            f"{config.n_actions} actions"
+        )
+    blocked = torch.ones(1, config.n_actions, dtype=torch.bool, device=device)
+    blocked[0, indices] = False
+    return np.asarray(indices, dtype=np.int64), blocked
+
+
 class IQNAgent:
     """Online and target networks, the optimiser, and the two operations on them.
 
@@ -185,25 +239,58 @@ class IQNAgent:
             self.online.parameters(), lr=self.config.lr, eps=self.config.adam_eps
         )
         self.steps = 0
+        self._allowed, self._blocked = _action_restriction(self.config, self.device)
+
+    def restrict(self, allowed_actions: tuple[int, ...] | None) -> None:
+        """Change which actions the policy may take, keeping everything else.
+
+        Rebuilding the agent would do the same thing to the networks and throw
+        away the Adam state, which on a run this long is worth as much as the
+        weights. The masks are derived state, so they have to be recomputed here
+        -- assigning ``config`` alone would leave the agent acting under the old
+        restriction while reporting the new one.
+        """
+        self.config = replace(self.config, allowed_actions=allowed_actions)
+        self.online.config = self.config
+        self.target.config = self.config
+        self._allowed, self._blocked = _action_restriction(self.config, self.device)
 
     # -- acting --------------------------------------------------------------
 
     @torch.no_grad()
     def act(self, observation: np.ndarray, epsilon: float = 0.0) -> int:
         if epsilon > 0.0 and np.random.random() < epsilon:
+            # Exploration has to respect the restriction too. A random BRAKE that
+            # the greedy policy can never choose is a transition the critic is
+            # asked to value for a policy that does not exist, and on a 50 ms
+            # control interval one of them costs half a car length.
+            if self._allowed is not None:
+                return int(self._allowed[np.random.randint(len(self._allowed))])
             return int(np.random.randint(self.config.n_actions))
         obs = torch.as_tensor(
             observation, dtype=torch.float32, device=self.device
         ).unsqueeze(0)
-        return int(self.online.q_values(obs, self.config.n_tau_action).argmax())
+        return int(self._mask(self.online.q_values(obs, self.config.n_tau_action)).argmax())
 
     @torch.no_grad()
     def action_values(self, observation: np.ndarray) -> np.ndarray:
-        """Q per action. For diagnostics and for seeding a search prior."""
+        """Q per action. For diagnostics and for seeding a search prior.
+
+        Restricted actions come back as ``-inf``, which is what a search prior
+        wants: softmaxed it is exactly zero probability, so a policy-guided
+        search inherits the restriction instead of quietly expanding past it.
+        """
         obs = torch.as_tensor(
             observation, dtype=torch.float32, device=self.device
         ).unsqueeze(0)
-        return self.online.q_values(obs, self.config.n_tau_action)[0].cpu().numpy()
+        values = self._mask(self.online.q_values(obs, self.config.n_tau_action))
+        return values[0].cpu().numpy()
+
+    def _mask(self, q_values: torch.Tensor) -> torch.Tensor:
+        """(B, A) Q-values with restricted actions driven to -inf."""
+        if self._blocked is None:
+            return q_values
+        return q_values.masked_fill(self._blocked, float("-inf"))
 
     # -- learning ------------------------------------------------------------
 
@@ -224,8 +311,14 @@ class IQNAgent:
         batch_size = obs.shape[0]
 
         with torch.no_grad():
-            # Double Q: the online net picks, the target net values.
-            best = self.online.q_values(next_obs, cfg.n_tau).argmax(dim=1)
+            # Double Q: the online net picks, the target net values. The pick is
+            # masked for the same reason the greedy action is: an unmasked argmax
+            # bootstraps every target through the best action *including the ones
+            # the policy cannot take*, so the critic converges to the value of a
+            # braking policy while the car never brakes. Every state's value is
+            # then optimistic by the amount braking would have been worth, which
+            # is exactly the error Double Q exists to avoid.
+            best = self._mask(self.online.q_values(next_obs, cfg.n_tau)).argmax(dim=1)
             taus_prime = torch.rand(batch_size, cfg.n_tau_prime, device=self.device)
             next_quantiles = self.target(next_obs, taus_prime)
             next_quantiles = next_quantiles.gather(
@@ -291,7 +384,7 @@ class IQNAgent:
     @classmethod
     def load(cls, path, device: str = "cpu") -> "IQNAgent":
         blob = torch.load(path, map_location=device, weights_only=False)
-        agent = cls(blob["config"], device=device)
+        agent = cls(_upgrade_config(blob["config"]), device=device)
         agent.online.load_state_dict(blob["online"])
         agent.target.load_state_dict(blob["target"])
         agent.optimiser.load_state_dict(blob["optimiser"])

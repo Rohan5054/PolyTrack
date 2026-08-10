@@ -32,13 +32,13 @@ python tests/test_search.py     #  9 tests
 python tests/test_trackcode.py  #  7 tests
 python tests/test_wasm.py       # 17 tests
 python tests/test_recording.py  # 14 tests
-python tests/test_reference.py  # 17 tests
-python tests/test_learning.py   # 14 tests
+python tests/test_reference.py  # 18 tests
+python tests/test_learning.py   # 19 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 102 pass. Four of the suites reach for files that are not in the repo and
+All 108 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -65,6 +65,7 @@ reward, on every record that matches an available track.
 POLYTRACK_TRACKS=path\to\tracks python scripts/build_library.py   # once, ~3 min
 python scripts/train.py --smoke                                   # 90 s, plumbing
 python scripts/train.py --workers 6
+python scripts/train.py --workers 6 --track "Winter 5" --forward-only
 ```
 
 `tracks.npz` is the cache that makes collectors viable: deriving a reference line
@@ -303,6 +304,40 @@ Time pressure therefore comes from the finish bonus, scaled by `par / elapsed`.
 That leaves the curriculum honest: learn to complete a lap, then to complete it
 quickly. `RewardConfig.time_penalty` exists and defaults to 0 — every positive
 value reopens the exploit in proportion to its size.
+
+**Encode certainty as a constraint, uncertainty as a reward.** The corollary of
+the rule above: since no term may be negative, "stop doing X" cannot be
+expressed as a penalty at all. When you are confident an action is never right,
+take it out of the action space — it costs nothing, shrinks credit assignment,
+and cannot distort the objective, whereas paying the agent not to use it is a
+tug of war with lap time needing a coefficient nobody can tune.
+
+`IQNConfig.allowed_actions` is that mechanism, and `--forward-only` is the one
+use of it so far. It is a *per-track* claim and the evidence is per track.
+Measured over `records.json`: the 19.025 Winter 5 lap holds throttle for
+**100.0%** of its 19,025 frames and never brakes; the 21.899 lap on the same
+track lifts for 12% and is 2.9 s slower. Every other track brakes for 8–21% of
+the lap, so forward-only would make them unfinishable. Only set it on a run that
+trains one track — `train.py` warns if you do otherwise.
+
+Restricting means masking in **three** places, and the third is the one that
+fails silently: the acting argmax, the epsilon-random branch, and the Double-Q
+bootstrap argmax inside `learn`. Leave the bootstrap unmasked and every target
+still reaches through `max_a Q(s', a)` over all nine actions, so the critic
+converges to the value of a policy that brakes while the car never brakes — the
+exact overestimation Double Q is in the loop to prevent. See
+`test_the_bootstrap_does_not_reach_through_a_forbidden_action`.
+
+**The restriction lives on `IQNConfig`, so it travels.** Into collector
+processes via `CollectorConfig.iqn_config`, and into the checkpoint, so
+`report.py --eval` and `tools/watch_run.py` inherit it without being told. Two
+consequences: `train.py` must build the collectors' config from `agent.config`
+and never from the CLI flags — a resumed learner takes its config from the
+checkpoint, and an action the collectors can take but the learner masks is a
+transition the critic is asked to value for a policy that never plays it. And
+because `IQNConfig` is `slots=True`, a field added later unpickles *unset* rather
+than defaulted, which is why `IQNAgent.load` runs `_upgrade_config`. These runs
+are hundreds of thousands of gradient steps; a checkpoint must keep loading.
 
 **A failed episode must still be cut.** The real backend never reports
 `terminated` — the module has no notion of "off track", a car in a ditch is just

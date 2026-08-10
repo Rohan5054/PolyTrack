@@ -294,6 +294,151 @@ def test_weights_survive_a_round_trip():
     assert np.allclose(a, b, atol=1e-6)
 
 
+def test_a_restricted_policy_never_takes_a_forbidden_action():
+    """Both branches of epsilon-greedy, not just the argmax.
+
+    A random BRAKE that the greedy policy can never choose is a transition the
+    critic is asked to value for a policy that does not exist -- and at a 50 ms
+    control interval one of them is half a car length.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    allowed = {3, 4, 5}
+    agent = IQNAgent(IQNConfig(obs_dim=8, hidden=32, allowed_actions=tuple(allowed)))
+    observation = np.random.randn(8).astype(np.float32)
+
+    greedy = {agent.act(observation) for _ in range(100)}
+    explored = {agent.act(observation, epsilon=1.0) for _ in range(400)}
+    assert greedy <= allowed, f"greedy chose {greedy - allowed}"
+    assert explored == allowed, f"exploration chose {explored ^ allowed}"
+
+    values = agent.action_values(observation)
+    assert np.isneginf(values[[0, 1, 2, 6, 7, 8]]).all(), "blocked action has a value"
+    assert np.isfinite(values[[3, 4, 5]]).all(), "allowed action lost its value"
+
+
+def test_the_bootstrap_does_not_reach_through_a_forbidden_action():
+    """The subtle half of a restriction, and the half that fails silently.
+
+    Masking only the acting argmax still leaves every TD target bootstrapped
+    through ``max_a Q(s', a)`` over *all nine* actions. The critic then converges
+    to the value of a policy that brakes while the car never brakes, so every
+    state is optimistic by whatever braking was worth -- which is precisely the
+    overestimation Double Q is in the loop to prevent.
+
+    Rigged so the failure is unmissable: BRAKE is worth 1000 and nothing else is
+    worth anything, so a target that leaks through it is three orders of
+    magnitude out rather than subtly wrong.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    def rigged(allowed):
+        torch.manual_seed(0)
+        agent = IQNAgent(IQNConfig(obs_dim=8, hidden=32, allowed_actions=allowed))
+        for net in (agent.online, agent.target):
+            with torch.no_grad():
+                net.head[-1].weight.zero_()
+                net.head[-1].bias.zero_()
+                net.head[-1].bias[6] = 1000.0  # BRAKE, and only BRAKE
+        return agent
+
+    batch = (
+        np.zeros((16, 8), dtype=np.float32),
+        np.full(16, 3, dtype=np.int64),
+        np.zeros(16, dtype=np.float32),
+        np.zeros((16, 8), dtype=np.float32),
+        np.zeros(16, dtype=np.float32),
+        np.full(16, 0.999, dtype=np.float32),
+    )
+    weights = np.ones(16, dtype=np.float32)
+
+    leaked, _ = rigged(None).learn(batch, weights)
+    masked, _ = rigged((3, 4, 5)).learn(batch, weights)
+    assert leaked.mean() > 900, "the rig did not work; unmasked should bootstrap 1000"
+    assert masked.mean() < 1.0, (
+        f"the target bootstrapped through BRAKE anyway (td {masked.mean():.1f})"
+    )
+
+
+def test_a_restriction_can_be_changed_without_losing_the_run():
+    """``restrict`` mid-run, on a checkpoint worth hundreds of thousands of steps.
+
+    Rebuilding the agent would apply the restriction just as well and discard the
+    Adam state, which by then is worth as much as the weights.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    agent = IQNAgent(IQNConfig(obs_dim=8, hidden=32))
+    batch = (
+        np.random.randn(8, 8).astype(np.float32),
+        np.random.randint(0, 9, 8).astype(np.int64),
+        np.random.rand(8).astype(np.float32),
+        np.random.randn(8, 8).astype(np.float32),
+        np.zeros(8, dtype=np.float32),
+        np.full(8, 0.999, dtype=np.float32),
+    )
+    agent.learn(batch, np.ones(8, dtype=np.float32))
+    exp_avg = agent.optimiser.state_dict()["state"][0]["exp_avg"].clone()
+
+    agent.restrict((3, 4, 5))
+    assert agent.steps == 1, "restricting reset the step count"
+    assert torch.equal(agent.optimiser.state_dict()["state"][0]["exp_avg"], exp_avg)
+    assert {agent.act(batch[0][0], 1.0) for _ in range(200)} == {3, 4, 5}
+
+    agent.restrict(None)
+    assert len({agent.act(batch[0][0], 1.0) for _ in range(400)}) == 9
+
+
+def test_a_checkpoint_written_before_the_field_existed_still_loads():
+    """``IQNConfig`` is ``slots=True``, so a new field is not merely defaulted.
+
+    Pickle stores exactly the slots that existed at write time and the generated
+    ``__setstate__`` zips them back, so a field added later ends up *unset* and
+    raises ``AttributeError`` from wherever it is first read. These runs are
+    hundreds of thousands of gradient steps and cannot be regenerated, so a
+    checkpoint has to keep loading across any field addition.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    from polytrack.learning.iqn import IQNConfig, _upgrade_config
+
+    stale = IQNConfig.__new__(IQNConfig)
+    stale.__setstate__(IQNConfig(lr=1e-3).__getstate__()[:-1])  # drop the newest
+    try:
+        stale.allowed_actions
+        raise AssertionError("the premise is gone: the slot is set after all")
+    except AttributeError:
+        pass
+
+    upgraded = _upgrade_config(stale)
+    assert upgraded.allowed_actions is None, "did not default the missing field"
+    assert upgraded.lr == 1e-3, "lost a field that was in the checkpoint"
+
+
+def test_an_unusable_restriction_is_rejected_at_construction():
+    torch = _torch()
+    if torch is None:
+        return
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    for bad in ((), (9,), (-1,)):
+        try:
+            IQNAgent(IQNConfig(obs_dim=8, hidden=32, allowed_actions=bad))
+        except ValueError:
+            continue
+        raise AssertionError(f"allowed_actions={bad} was accepted")
+
+
 def test_epsilon_spread_covers_greedy_and_exploratory_actors():
     from polytrack.learning.collector import CollectorConfig, worker_epsilon
 

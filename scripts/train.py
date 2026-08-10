@@ -31,10 +31,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
+from polytrack.actions import Action
 from polytrack.learning.collector import CollectorConfig, CollectorPool, EpisodeStats
 from polytrack.learning.iqn import IQNAgent, IQNConfig
 from polytrack.learning.replay import PrioritisedReplay
 from polytrack.library import TrackLibrary
+
+#: The three throttle actions. Everything else -- coast and brake, straight or
+#: turning -- is removed by ``--forward-only``. Steering is untouched: the claim
+#: the human records support is about the longitudinal input only.
+FORWARD_ONLY = (
+    int(Action.THROTTLE),
+    int(Action.THROTTLE_LEFT),
+    int(Action.THROTTLE_RIGHT),
+)
 
 
 def parse_args(argv=None):
@@ -65,6 +75,19 @@ def parse_args(argv=None):
         "--replay-ratio", type=float, default=1.0,
         help="gradient steps per transition collected. Higher than the usual "
              "0.25 because the simulator, not the learner, is the constraint",
+    )
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument(
+        "--forward-only", action="store_true",
+        help="restrict the policy to the three throttle actions -- no coasting, "
+             "no braking. Correct on Winter 5, where the 19.025 human lap holds "
+             "throttle for 100%% of its frames and never brakes; wrong on every "
+             "other track in records.json, which brake for 8-21%% of the lap. "
+             "Sticks to the checkpoint, so resumes and evaluations inherit it",
+    )
+    actions.add_argument(
+        "--all-actions", action="store_true",
+        help="clear a restriction carried in a resumed checkpoint",
     )
     parser.add_argument("--control-interval-ms", type=float, default=50.0)
     parser.add_argument("--n-step", type=int, default=5)
@@ -108,16 +131,6 @@ def main(argv=None) -> int:
     out = Path("runs") / args.name
     out.mkdir(parents=True, exist_ok=True)
 
-    iqn_config = IQNConfig(lr=args.lr, gamma=args.gamma)
-    collector_config = CollectorConfig(
-        library_path=str(args.library.resolve()),
-        track_names=tuple(args.track or ()),
-        control_interval_ms=args.control_interval_ms,
-        n_step=args.n_step,
-        gamma=args.gamma,
-        iqn_config=iqn_config,
-    )
-
     history: list[dict] = []
     elapsed_offset = 0.0
     resumed_best: dict[str, int] = {}
@@ -143,7 +156,36 @@ def main(argv=None) -> int:
         print(f"\n  resumed from {args.resume} at {agent.steps:,} gradient steps"
               f" / {elapsed_offset / 60:.0f} min")
     else:
-        agent = IQNAgent(iqn_config)
+        agent = IQNAgent(IQNConfig(lr=args.lr, gamma=args.gamma))
+
+    # An action restriction is part of the checkpoint, so a resume keeps whatever
+    # it was trained under unless told otherwise. Changing it here rather than at
+    # construction means --forward-only can be turned on partway through a run.
+    if args.forward_only:
+        agent.restrict(FORWARD_ONLY)
+    elif args.all_actions:
+        agent.restrict(None)
+
+    restriction = agent.config.allowed_actions
+    if restriction is not None and len(library) > 1:
+        print("\n  WARNING: an action restriction is set on a run covering "
+              f"{len(library)} tracks.\n  It is a per-track claim -- the human "
+              "records brake for 8-21% of the lap on\n  every track except "
+              "Winter 5. Pass --track to train one, or --all-actions.\n")
+
+    collector_config = CollectorConfig(
+        library_path=str(args.library.resolve()),
+        track_names=tuple(args.track or ()),
+        control_interval_ms=args.control_interval_ms,
+        n_step=args.n_step,
+        gamma=args.gamma,
+        # The agent's config, not one rebuilt from the CLI. A resumed learner
+        # takes its config from the checkpoint, so building the collectors' from
+        # the flags instead let the two disagree -- and they must not: an action
+        # the collectors can take but the learner masks is a transition the
+        # critic is asked to value for a policy that never plays it.
+        iqn_config=agent.config,
+    )
     replay = PrioritisedReplay(
         capacity=args.capacity, obs_dim=agent.config.obs_dim
     )
@@ -152,6 +194,10 @@ def main(argv=None) -> int:
     print(library.describe())
     print(f"\n  {args.workers} collectors, batch {args.batch_size}, "
           f"n-step {args.n_step}, replay ratio {args.replay_ratio}")
+    print("  actions: " + (
+        "all 9" if restriction is None
+        else ", ".join(Action(a).name.lower() for a in restriction)
+    ))
     print(f"  writing to {out}\n")
 
     pool = CollectorPool(args.workers, collector_config)
