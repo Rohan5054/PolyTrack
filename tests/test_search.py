@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from polytrack.actions import ACTION_TO_MASK
+from polytrack.actions import ACTION_TO_MASK, N_ACTIONS, Action
 from polytrack.physics.reference import ReferencePhysics
 from polytrack.search import BeamSearch, CEMSearch
 from polytrack.track import (
@@ -165,6 +165,92 @@ def test_search_output_replays_identically():
 
     assert final is not None
     assert final.finished, "searched run did not finish on a clean replay"
+    assert final.state.frame == result.frames, (
+        f"replay took {final.state.frame} frames, search reported {result.frames}"
+    )
+
+
+def test_a_prior_confines_the_search_to_the_actions_it_rates():
+    """The prior is what makes nine actions affordable, so it must actually bind.
+
+    Nine actions five blocks ahead is 59,049 futures; the top three is 243. If a
+    prior were consulted and then quietly ignored, the search would still work
+    and would simply cost twenty times more, which is the kind of bug that shows
+    up as "search is too slow to be useful" rather than as a failure.
+    """
+    track = chicane_track()
+    wanted = (Action.THROTTLE, Action.THROTTLE_LEFT)
+    calls = []
+
+    def prior(state, arc, lateral):
+        calls.append(arc)
+        values = np.full(N_ACTIONS, -np.inf)
+        values[list(wanted)] = [1.0, 0.5]
+        return values
+
+    result = BeamSearch(
+        ReferencePhysics(track), track, beam_width=8, block_frames=6,
+        prior=prior, top_k=2,
+    ).run(max_frames=1800)
+
+    assert calls, "the prior was never consulted"
+    assert result.tas is not None
+    used = {mask for _, mask in ((c.frame, c.mask) for c in result.tas.changes)}
+    allowed = {ACTION_TO_MASK[a] for a in wanted}
+    assert used <= allowed, f"search used masks the prior ruled out: {used - allowed}"
+
+
+def test_top_k_actually_reduces_the_branching_factor():
+    track = chicane_track()
+
+    def prior(state, arc, lateral):
+        # Deliberately uninformative: the ordering is arbitrary, so any change in
+        # cost has to come from top_k rather than from better guidance.
+        return np.arange(N_ACTIONS, dtype=float)
+
+    def rollouts(top_k):
+        search = BeamSearch(
+            ReferencePhysics(track), track, beam_width=8, block_frames=6,
+            prior=prior, top_k=top_k,
+        )
+        search.run(max_frames=600)
+        return search._rollouts
+
+    narrow, wide = rollouts(2), rollouts(6)
+    assert narrow < wide, f"top-2 cost {narrow} rollouts, top-6 cost {wide}"
+
+
+def test_a_guided_search_still_replays_identically():
+    """The prior changes which branches are explored, never what a branch does.
+
+    Worth pinning separately: the guided path also runs each surviving candidate
+    a second time to materialise the state its scoring pass discarded, and that
+    only produces the trajectory it scored if the backend is exactly
+    deterministic across save and restore.
+    """
+    track = chicane_track()
+
+    def prior(state, arc, lateral):
+        values = np.full(N_ACTIONS, -np.inf)
+        for action in (Action.THROTTLE, Action.THROTTLE_LEFT, Action.THROTTLE_RIGHT):
+            values[action] = float(action)
+        return values
+
+    result = BeamSearch(
+        ReferencePhysics(track), track, beam_width=16, block_frames=6,
+        prior=prior, top_k=3,
+    ).run(max_frames=1800)
+    assert result.finished, result.summary()
+    assert result.tas is not None
+
+    clean = ReferencePhysics(track)
+    clean.reset()
+    final = None
+    for mask in result.tas.expand():
+        final = clean.step(mask)
+        if final.finished or final.terminated:
+            break
+    assert final is not None and final.finished
     assert final.state.frame == result.frames, (
         f"replay took {final.state.frame} frames, search reported {result.frames}"
     )

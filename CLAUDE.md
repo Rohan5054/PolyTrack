@@ -28,7 +28,7 @@ anything.
 ```bash
 pip install -e .[learning]      # torch is training-only; the rest runs without
 python tests/test_core.py       # 24 tests
-python tests/test_search.py     #  9 tests
+python tests/test_search.py     # 12 tests
 python tests/test_trackcode.py  #  7 tests
 python tests/test_wasm.py       # 17 tests
 python tests/test_recording.py  # 14 tests
@@ -38,7 +38,7 @@ python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 108 pass. Four of the suites reach for files that are not in the repo and
+All 111 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -190,7 +190,7 @@ polytrack/
   env.py          Gymnasium env; progress reward + time penalty
   reference.py    replay -> trajectory -> reference line -> environment
   library.py      tracks.npz: track code + reference line + par time, cached
-  search.py       BeamSearch, CEMSearch, RefinementSearch
+  search.py       BeamSearch (+ optional policy prior), CEMSearch, RefinementSearch
   learning/
     replay.py     sum-tree prioritised replay + n-step returns
     iqn.py        the quantile critic, its loss, and the agent
@@ -392,14 +392,52 @@ times; and the IQN training loop with parallel collectors.
    bootstrap: a generated track knows its own route, so it needs no lap driven
    for it. Until it exists, **four tracks is a memorisation problem, not a
    generalisation one.**
-3. **Policy-guided search** — feed the trained policy in as an action prior so
-   search only expands plausible actions. This is the hybrid the review
-   recommended, and where record times come from.
+3. ~~**Policy-guided search**~~ — done. `BeamSearch(prior=..., top_k=...)` and
+   `scripts/search_run.py`. See below.
 
 The biggest available speed-up is sample efficiency, not throughput: episodes
 re-drive the first half of the track constantly. Linesight starts episodes from
-points spread along the reference line, which needs `save_state` to be cheaper
-than a 24 MB heap pickle. Narrow it with the gate to check against.
+points spread along the reference line. That needs `save_state`, and `save_state`
+turns out to be affordable — see below — so this is now mostly plumbing.
+
+## Search
+
+```bash
+python scripts/search_run.py runs/w5-fwd/agent.pt --track "Winter 5" \
+    --beam 16 --top-k 3 --budget-ms 25000
+```
+
+**Score on progress at equal depth, never on reward.** Every candidate at a
+given depth has burned exactly the same number of frames, so "furthest along the
+track" *is* "fastest to here". No coefficients, and none of the exploits that
+make search such an adversarial consumer of a shaped reward.
+
+Three things make a beam across a whole lap affordable, and the first was a
+wrong assumption in this file for a long time:
+
+* **`save_state` costs 13.9 ms**, not the prohibitive figure the old note here
+  implied. Against 14.4 s to replay a 19.4-second lap from frame zero that is a
+  factor of a thousand. Measure before designing around a cost.
+* **The prior.** Nine actions five blocks ahead is 59,049 futures; the policy's
+  top three is 243, and they are 243 the policy thinks are driveable. Restricted
+  actions arrive as `-inf` and are dropped, so a `--forward-only` checkpoint
+  searches its three throttle actions and cannot propose a braking line — guide
+  with an unrestricted checkpoint if you want one considered.
+* **Bounded memory, via two passes per depth.** Scoring children with their 24 MB
+  states attached holds `beam_width * top_k` of them at once — 3.5 GB at the old
+  default width. Pass one keeps only the numbers; pass two re-runs the survivors
+  to materialise their states. A third more simulation, and peak memory drops
+  from 4× the beam to 2× (measured: 717 MB at beam 16). **This is sound only
+  because the backend is exactly deterministic across save and restore** — the
+  same property the gate checks.
+
+Take the **earliest** finisher in a depth, not the first one expanded.
+Candidates cross the line at different frames *within* a block, so first-found
+is an ordering accident worth up to a whole block — 50 ms, more than the margin
+these searches are run to find.
+
+`scripts/search_demo.py` is unrelated and stays on `ReferencePhysics` and a
+synthetic chicane; it demonstrates the algorithms, not the track.
 
 ## Known loose ends
 
@@ -415,8 +453,11 @@ than a 24 MB heap pickle. Narrow it with the gate to check against.
   reference line and `Track.width`. With the real backend that measures distance
   from *the driven lap*, not from a wall — the module has the collision geometry
   and this should ask it. Isolated in one method for exactly this reason.
-- `WasmPhysics.save_state` pickles the entire heap (~24 MB a call). Correct, and
-  far too slow for beam search. Narrow it only with the gate to check against.
+- `WasmPhysics.save_state` pickles the entire heap, 24 MB a call. This was
+  recorded here as "far too slow for beam search" and that was never measured:
+  it is **13.9 ms**, against 14.4 s to replay a lap. Narrowing it would cut
+  search memory, which is the real constraint, but it is not urgent and it is
+  the kind of change that can only be made with the gate to check against.
 - The 47 legacy pre-`PolyTrack2` community tracks still do not decode, which
   shrinks the corpus the generator can learn a style from.
 
