@@ -90,6 +90,16 @@ def parse_args(argv=None):
         help="clear a restriction carried in a resumed checkpoint",
     )
     parser.add_argument("--control-interval-ms", type=float, default=50.0)
+    parser.add_argument(
+        "--time-limit-factor", type=float, default=3.0,
+        help="episode budget as a multiple of the track's par time. 3x is right "
+             "while the question is whether the car can get round at all; once "
+             "it finishes regularly it is mostly waste, because a timeout costs "
+             "the whole budget and a finish costs par. Under --forward-only it "
+             "is worse still: a car that always accelerates keeps gaining ground "
+             "while it pinballs off walls, so the stall cut never fires and the "
+             "run burns the full budget at a fifth of par pace",
+    )
     parser.add_argument("--n-step", type=int, default=5)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--lr", type=float, default=5e-5)
@@ -177,6 +187,7 @@ def main(argv=None) -> int:
         library_path=str(args.library.resolve()),
         track_names=tuple(args.track or ()),
         control_interval_ms=args.control_interval_ms,
+        time_limit_factor=args.time_limit_factor,
         n_step=args.n_step,
         gamma=args.gamma,
         # The agent's config, not one rebuilt from the CLI. A resumed learner
@@ -194,6 +205,7 @@ def main(argv=None) -> int:
     print(library.describe())
     print(f"\n  {args.workers} collectors, batch {args.batch_size}, "
           f"n-step {args.n_step}, replay ratio {args.replay_ratio}")
+    print(f"  episode budget {args.time_limit_factor:g}x par")
     print("  actions: " + (
         "all 9" if restriction is None
         else ", ".join(Action(a).name.lower() for a in restriction)
@@ -213,6 +225,8 @@ def main(argv=None) -> int:
     started = time.monotonic()
     last_log = started
     collected = 0
+    last_log_steps = agent.steps
+    last_log_collected = 0
     losses: deque = deque(maxlen=200)
     episodes: deque = deque(maxlen=100)
     finishes = 0
@@ -279,17 +293,30 @@ def main(argv=None) -> int:
                 # the run as a whole, which is what the curve is plotted against.
                 block = now - started
                 elapsed = block + elapsed_offset
+                # Rates over the log interval, not since the block began. The
+                # cumulative version is dominated for a long time by the
+                # --learn-after warmup, during which the learner does nothing at
+                # all, so a resumed run reads as starved for the best part of an
+                # hour after it has fully recovered. That is not a cosmetic
+                # difference: it is the number report.py raises the alarm on.
+                window = max(now - last_log, 1e-9)
+                finished_recently = [e.frames for e in episodes if e.finished]
+                window_steps = agent.steps - last_log_steps
+                window_trans = collected - last_log_collected
+                last_log_steps, last_log_collected = agent.steps, collected
                 row = {
                     "seconds": round(elapsed, 1),
                     "gradient_steps": agent.steps,
                     "transitions": collected,
                     "buffer": len(replay),
-                    "transitions_per_second": round(collected / max(block, 1e-9), 1),
+                    "transitions_per_second": round(window_trans / window, 1),
+                    "steps_per_second": round(window_steps / window, 1),
                     # Gradient steps actually achieved per transition. If this
                     # sits well under --replay-ratio the learner is the
                     # bottleneck, not the collectors, and most of what they
                     # produce is never learned from.
-                    "achieved_ratio": round(
+                    "achieved_ratio": round(window_steps / max(window_trans, 1), 3),
+                    "cumulative_ratio": round(
                         (agent.steps - started_steps) / max(collected, 1), 3
                     ),
                     "loss": round(float(np.mean(losses)), 4) if losses else None,
@@ -314,6 +341,20 @@ def main(argv=None) -> int:
                              if e.epsilon == min(x.epsilon for x in episodes)]
                         )), 3) if episodes else None
                     ),
+                    # How fast the laps that *did* finish were. "best" only moves
+                    # on a record, so a run whose median finish is coming down
+                    # from 30 s to 22 s looks identical in the log to one that is
+                    # doing nothing -- and that is exactly the window where you
+                    # want to know whether to keep paying for electricity.
+                    "finish_median": (
+                        round(float(np.median(finished_recently)) / 1000, 3)
+                        if finished_recently else None
+                    ),
+                    "finish_best": (
+                        round(min(finished_recently) / 1000, 3)
+                        if finished_recently else None
+                    ),
+                    "finish_rate": round(len(finished_recently) / max(len(episodes), 1), 3),
                     "failures": {
                         reason: sum(1 for e in episodes if e.failure == reason)
                         for reason in sorted({e.failure for e in episodes})
@@ -323,13 +364,15 @@ def main(argv=None) -> int:
                 history.append(row)
                 print(
                     f"  {elapsed / 60:6.1f} min | "
-                    f"{agent.steps:>7,} steps | "
-                    f"{collected:>7,} trans ({row['transitions_per_second']:.1f}/s) | "
+                    f"{agent.steps:>7,} steps ({row['steps_per_second']:.0f}/s) | "
+                    f"{collected:>7,} trans ({row['transitions_per_second']:.0f}/s) | "
                     f"ratio {row['achieved_ratio']:.2f} | "
                     f"loss {row['loss'] if row['loss'] is not None else '--':>8} | "
                     f"lap {row['mean_fraction'] if row['mean_fraction'] is not None else '--':>5} "
                     f"(greedy {row['greedy_fraction'] if row['greedy_fraction'] is not None else '--':>5}) | "
-                    f"return {row['mean_return'] if row['mean_return'] is not None else '--':>7} | "
+                    f"fin {row['finish_rate'] * 100:>3.0f}% "
+                    f"{row['finish_median'] if row['finish_median'] is not None else '--':>6} "
+                    f"med / {row['finish_best'] if row['finish_best'] is not None else '--':>6} best | "
                     f"{row['episodes']} eps {row['failures']}"
                 )
                 (out / "history.json").write_text(json.dumps(history, indent=1))

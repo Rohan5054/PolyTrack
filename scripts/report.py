@@ -48,19 +48,24 @@ def curve(history: list[dict], rows: int = 10) -> None:
     spark = "".join(blocks[min(int(v / peak * 9), 9)] for v in laps[::step])
 
     print(f"  lap  {spark}  (peak {peak:.3f})\n")
-    print("      time    steps   trans/s  ratio      lap   greedy    return"
-          "   failures")
+    print("      time    steps   trans/s  ratio      lap   greedy   fin%"
+          "   median     best   failures")
     for r in sample:
         greedy = r.get("greedy_fraction")
-        # Runs started before greedy_fraction existed simply have no column.
-        greedy_text = f"{greedy:.3f}" if greedy is not None else "--"
+        # Runs started before a column existed simply do not have it.
+        def opt(key, fmt="{:.3f}"):
+            value = r.get(key)
+            return fmt.format(value) if value is not None else "--"
+
         print(
             f"    {r['seconds'] / 60:6.1f}m {r['gradient_steps']:>8,} "
             f"{r['transitions_per_second']:>8.1f} "
             f"{r.get('achieved_ratio', 0):>6.2f} "
             f"{(r.get('mean_fraction') or 0):>8.3f} "
-            f"{greedy_text:>8} "
-            f"{(r.get('mean_return') or 0):>9.1f}   "
+            f"{opt('greedy_fraction'):>8} "
+            f"{(r.get('finish_rate') or 0) * 100:>5.0f} "
+            f"{opt('finish_median'):>8} "
+            f"{opt('finish_best'):>8}   "
             f"{_failures(r)}"
         )
 
@@ -103,7 +108,11 @@ def verdict(history: list[dict]) -> None:
               "learned what it\n  can from these four tracks, or something is "
               "stuck -- run with --eval to see\n  which.")
 
-    ratio = history[-1].get("achieved_ratio")
+    # Averaged over the last few rows: since these are now per-interval rates
+    # rather than since-block-start ones, a single row is noisy enough to raise
+    # a false alarm on its own.
+    recent_ratios = [r["achieved_ratio"] for r in history[-5:] if "achieved_ratio" in r]
+    ratio = float(np.mean(recent_ratios)) if recent_ratios else None
     if ratio is not None and ratio < 0.3:
         print(f"\n  Learner is starved: {ratio:.2f} gradient steps per "
               "transition. Most of what\n  the collectors produce is never "
