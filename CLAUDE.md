@@ -459,6 +459,37 @@ Two mechanisms, and the second is the one worth remembering:
 candidates *behind* the leader, one per band. Neither existed for the first run;
 both have tests that reproduce the failure in miniature.
 
+### Windowed beam, and the guide
+
+```bash
+python scripts/search_run.py runs/w5-fwd/agent.pt --track "Winter 5" \
+    --refine runs/searched/seed.json --beam-window 17.5,21.0 --beam 6 --top-k 2
+```
+
+Anchor part way through a known lap and beam from there. Two rules, both learned
+by breaking them:
+
+**Run the window to the finish; never splice.** Replaying the seed's remaining
+inputs after a window that changed the car is *open loop* and unsound — those
+inputs were tuned for the seed's trajectory. The first windowed run put the beam
+**9 m ahead at 14.0 s** and then reported all sixteen spliced laps as slower,
+which was the splice failing, not the lines.
+
+**Always carry a guide.** `BeamSearch(guide=...)` keeps a known-good action
+sequence in the beam at every depth however it scores, and repopulates from it
+alone if everything else dies. Without it a beam prunes on arc, fills with the
+branches carrying most speed, and has nothing left when a corner punishes all of
+them at once — 891.8 m on the whole-track run, 1362 m on a windowed one that was
+22 m ahead at 16.0 s. Both times the surviving line existed and had been
+discarded several depths earlier: the seed's own. With a guide the search is
+bounded below by its seed, for one extra expansion per depth.
+
+**Cost is proportional to (finish − anchor), so work backwards.** A late window
+is cheap and an early one expensive, and an early anchor subsumes every later
+one. Search the end first, bank the gain, re-seed, then move the anchor earlier.
+The first gain in this whole effort — 19.419 → **19.405** — came from a
+three-minute smoke test on the last two seconds at beam 6.
+
 ### Refinement
 
 ```bash
