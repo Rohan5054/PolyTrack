@@ -68,7 +68,105 @@ def parse_args(argv=None):
     )
     parser.add_argument("--max-seconds", type=float, default=float("inf"))
     parser.add_argument("--out", type=Path, default=Path("runs/searched"))
+    parser.add_argument(
+        "--refine", type=Path, default=None, metavar="JSON",
+        help="polish an existing lap instead of searching from the line. Takes a "
+             "best_<track>.json or an exported run. Beam search has to re-solve "
+             "the whole track and can lose its entire beam to one corner; "
+             "refinement starts from a lap that already works and can only "
+             "improve on it",
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=300,
+        help="--refine only: perturbations to try, spread over the sweep",
+    )
+    parser.add_argument(
+        "--window-blocks", type=int, default=6,
+        help="--refine only: how many consecutive blocks a perturbation rewrites",
+    )
+    parser.add_argument("--seed", type=int, default=0)
     return parser.parse_args(argv)
+
+
+def _beam(args, entry, assets, prior, started, deadline):
+    """Search from the start line, expanding only what the policy rates."""
+    import time as _time
+
+    from polytrack.physics.wasm import WasmPhysics
+    from polytrack.search import BeamSearch
+
+    depths = args.budget_ms // args.block_ms
+    print(f"  beam {args.beam}, top-{args.top_k}, {args.block_ms} ms blocks, "
+          f"up to {depths} depths\n")
+
+    def on_depth(depth: int, best) -> None:
+        if depth % 20 == 0 or depth == depths - 1:
+            elapsed = _time.monotonic() - started
+            done = best.arc / entry.line.length
+            # Extrapolate on distance covered, not depths used: the budget is a
+            # cap, the lap length is the actual finish line.
+            eta = elapsed / max(done, 1e-6) - elapsed
+            print(f"    depth {depth:>4}  {best.frame / 1000:6.2f} s simulated  "
+                  f"{best.arc:7.1f} m ({done * 100:5.1f}%)  "
+                  f"{elapsed / 60:5.1f} min elapsed, ~{eta / 60:.0f} min left",
+                  flush=True)
+        deadline()
+
+    return BeamSearch(
+        backend=WasmPhysics(entry.track_code(), assets=assets),
+        track=entry.line,
+        beam_width=args.beam,
+        block_frames=args.block_ms,
+        prior=prior,
+        top_k=args.top_k,
+    ).run(max_frames=args.budget_ms, on_depth=on_depth)
+
+
+def _refine(args, entry, assets, allowed, started, deadline):
+    """Polish a lap that already finishes, sweeping a window along it.
+
+    Beam search has to solve the whole track and can lose its entire beam to one
+    corner -- on Winter 5 it did, at 51%, and then sat there for twelve seconds
+    of simulated time because a forward-only car cannot back out of a wall.
+    Refinement cannot fail that way: it starts from a run that works and keeps a
+    change only if the run got faster.
+    """
+    import time as _time
+
+    from polytrack.physics.wasm import WasmPhysics
+    from polytrack.recording import Recording
+    from polytrack.search import RefinementSearch
+    from polytrack.tas import TAS, format_time
+
+    saved = json.loads(args.refine.read_text())
+    seed_frames = int(saved["frames"])
+    masks = list(Recording.deserialize(saved["recording"]).masks(seed_frames))
+    seed = TAS.from_frame_masks(masks)
+    print(f"  refining {format_time(seed_frames)} from {args.refine.name}")
+    print(f"  {args.iterations} perturbations, {args.window_blocks} x "
+          f"{args.block_ms} ms windows, actions "
+          f"{allowed if allowed else 'all 9'}\n")
+
+    n_blocks = -(-seed_frames // args.block_ms) + 4
+
+    def on_progress(start, total, best_frames, finished):
+        elapsed = _time.monotonic() - started
+        gain = seed_frames - best_frames if finished else 0
+        print(f"    window at {start * args.block_ms / 1000:5.1f} s "
+              f"of {n_blocks * args.block_ms / 1000:.1f}  "
+              f"best {best_frames / 1000:7.3f} s ({gain:+,} ms)  "
+              f"{elapsed / 60:5.1f} min", flush=True)
+        deadline()
+
+    return RefinementSearch(
+        backend=WasmPhysics(entry.track_code(), assets=assets),
+        track=entry.line,
+        block_frames=args.block_ms,
+        window_blocks=args.window_blocks,
+        seed=args.seed,
+        actions=allowed,
+        on_progress=on_progress,
+    ).run(seed, iterations=args.iterations)
 
 
 def main(argv=None) -> int:
@@ -107,43 +205,25 @@ def main(argv=None) -> int:
         """
         return agent.action_values(observer.build(state, arc, lateral))
 
-    search = BeamSearch(
-        backend=WasmPhysics(entry.track_code(), assets=assets),
-        track=entry.line,
-        beam_width=args.beam,
-        block_frames=args.block_ms,
-        prior=prior,
-        top_k=args.top_k,
-    )
-
-    depths = args.budget_ms // args.block_ms
     print(f"\n  {entry.name}: {entry.line.length:.0f} m, par "
           f"{format_time(entry.par_frames)}")
     print(f"  guided by {args.checkpoint} at {agent.steps:,} gradient steps"
           + (f", actions {allowed}" if allowed else ", all 9 actions"))
-    print(f"  beam {args.beam}, top-{args.top_k}, {args.block_ms} ms blocks, "
-          f"up to {depths} depths\n")
 
     started = time.monotonic()
     deadline_hit = False
 
-    def on_depth(depth: int, best) -> None:
+    def deadline() -> None:
         nonlocal deadline_hit
-        elapsed = time.monotonic() - started
-        if depth % 20 == 0 or depth == depths - 1:
-            done = best.arc / entry.line.length
-            # Extrapolate on distance covered, not depths used: the budget is a
-            # cap, the lap length is the actual finish line.
-            eta = elapsed / max(done, 1e-6) - elapsed
-            print(f"    depth {depth:>4}  {best.frame / 1000:6.2f} s simulated  "
-                  f"{best.arc:7.1f} m ({done * 100:5.1f}%)  "
-                  f"{elapsed / 60:5.1f} min elapsed, ~{eta / 60:.0f} min left")
-        if elapsed > args.max_seconds:
+        if time.monotonic() - started > args.max_seconds:
             deadline_hit = True
             raise KeyboardInterrupt
 
     try:
-        result = search.run(max_frames=args.budget_ms, on_depth=on_depth)
+        if args.refine:
+            result = _refine(args, entry, assets, allowed, started, deadline)
+        else:
+            result = _beam(args, entry, assets, prior, started, deadline)
     except KeyboardInterrupt:
         print("\n  stopped" + (" at --max-seconds" if deadline_hit else ""))
         return 1
