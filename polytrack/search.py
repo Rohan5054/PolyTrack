@@ -149,6 +149,7 @@ class BeamSearch:
         stall_metres: float = 0.5,
         reserve: int = 0,
         reserve_band: float = 8.0,
+        guide: tuple[int, ...] | None = None,
     ) -> None:
         self.backend = backend
         self.track = track
@@ -177,6 +178,21 @@ class BeamSearch:
         #: alive, which is the one thing that gets through it.
         self.reserve = int(reserve)
         self.reserve_band = float(reserve_band)
+        #: A known-good action sequence, one entry per depth, kept in the beam at
+        #: every depth no matter how it scores.
+        #:
+        #: This is what makes a beam **bounded below by its seed**, the property
+        #: that made refinement safe and whose absence killed two beam runs. A
+        #: beam prunes on arc, so it fills with the branches carrying most speed,
+        #: and when a corner punishes all of them at once there is nothing left:
+        #: the whole-track run died at 891.8 m, and a windowed run that was 22 m
+        #: ahead at 16.0 s died at 1362 m. Both times a line that survives the
+        #: corner existed and had been thrown away several depths earlier -- the
+        #: seed's own.
+        #:
+        #: Carrying it costs one expansion per depth and guarantees the search
+        #: can never return worse than what it started from.
+        self.guide = guide
         self._rollouts = 0
         self._frames = 0
         #: The surviving candidates after the last :meth:`descend`.
@@ -236,8 +252,15 @@ class BeamSearch:
         self.beam = beam
         history: list[float] = []
         best_arc = root.arc
+        incumbent: Candidate | None = root if self.guide else None
 
         for depth in range(max_depth):
+            # The guide line first, so that whatever the beam does to itself this
+            # depth, the known-good trajectory is still there at the end of it.
+            guided: Candidate | None = None
+            if incumbent is not None and depth < len(self.guide or ()):
+                guided = self._materialise(incumbent, self.guide[depth])
+                incumbent = None if guided.terminated else guided
             # Two passes over the depth, because a saved state is 24 MB against
             # 14 ms to make one. Scoring every child with its blob attached would
             # hold beam_width * len(actions) of them at once -- 3.5 GB at the
@@ -262,6 +285,9 @@ class BeamSearch:
                         continue
                     scored.append((outcome, index, action))
 
+            if guided is not None and guided.finished:
+                finishers.append((guided.frame, -1, -1))
+
             if finishers:
                 # The earliest finisher in the depth, not the first one found.
                 # Candidates cross the line at different frames *within* a block,
@@ -269,16 +295,29 @@ class BeamSearch:
                 # block -- 50 ms, which is more than the margin these searches
                 # are run to find.
                 _, index, action = min(finishers)
-                winner = self._materialise(beam[index], action)
+                winner = (
+                    guided if index < 0 else self._materialise(beam[index], action)
+                )
+                assert winner is not None
                 self.winner = winner
                 return self._result(winner, history, finished=True)
 
             if not scored:
-                break
-
-            beam = self._prune_scored(scored, beam)
+                # Every branch the beam explored is dead. The guide, if there is
+                # one, is not -- carry it alone and let it repopulate.
+                if guided is None:
+                    break
+                beam = [guided]
+            else:
+                beam = self._prune_scored(scored, beam)
+                if guided is not None and not any(
+                    c.actions == guided.actions for c in beam
+                ):
+                    beam.insert(0, guided)
             self.beam = beam
-            best = beam[0]
+            # By score, not position: the guide is inserted at the front and is
+            # usually not the furthest-along candidate.
+            best = max(beam, key=lambda c: c.score)
             best_arc = max(best_arc, best.arc)
             history.append(best.arc)
             if on_depth is not None:

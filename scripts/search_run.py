@@ -264,6 +264,10 @@ def _beam_window(args, entry, assets, prior, allowed, started, deadline):
         backend=backend, track=entry.line, beam_width=args.beam,
         block_frames=args.block_ms, prior=prior, top_k=args.top_k,
         reserve=args.reserve,
+        # The seed's own actions from the anchor on. Kept in the beam at every
+        # depth, so the search is bounded below by the lap it started from and
+        # cannot lose every candidate to a corner the seed drives through.
+        guide=tuple(int(a) for a in blocks[first:]),
     )
 
     def on_depth(depth, best):
@@ -293,7 +297,7 @@ def _beam_window(args, entry, assets, prior, allowed, started, deadline):
         print("    (open-loop tail -- only trustworthy where the window barely "
               "moved the car)")
         best_frames, best_actions = seed_frames, None
-    for i, candidate in enumerate(survivors):
+    for i, candidate in enumerate(search.beam):
         backend.load_state(candidate.blob)
         result = None
         for action in tail:
