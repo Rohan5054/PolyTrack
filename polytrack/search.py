@@ -179,6 +179,8 @@ class BeamSearch:
         self.reserve_band = float(reserve_band)
         self._rollouts = 0
         self._frames = 0
+        #: The surviving candidates after the last :meth:`descend`.
+        self.beam: list[Candidate] = []
 
     def run(
         self,
@@ -197,22 +199,41 @@ class BeamSearch:
 
         state = self.backend.reset()
         arc, lateral = self.track.project(state.position)
-        beam = [
-            Candidate(
-                blob=self.backend.save_state(),
-                frame=0,
-                checkpoint=state.checkpoint,
-                arc=arc,
-                actions=(),
-                position=state.position.copy(),
-                velocity=state.velocity.copy(),
-                state=state,
-                lateral=lateral,
-            )
-        ]
+        root = Candidate(
+            blob=self.backend.save_state(),
+            frame=0,
+            checkpoint=state.checkpoint,
+            arc=arc,
+            actions=(),
+            position=state.position.copy(),
+            velocity=state.velocity.copy(),
+            state=state,
+            lateral=lateral,
+        )
+        return self.descend(root, max_frames // self.block_frames, on_depth)
+
+    def descend(
+        self,
+        root: Candidate,
+        max_depth: int,
+        on_depth: Callable[[int, Candidate], None] | None = None,
+    ) -> SearchResult:
+        """Expand from ``root`` for at most ``max_depth`` blocks.
+
+        Split out of :meth:`run` so a beam can start from a state restored part
+        way through a known lap instead of from the start line. Searching four
+        seconds of a corner is a different proposition from searching a whole
+        track: the failure that killed the Winter 5 run needed a long way to
+        develop, and a short window simply does not give it room.
+
+        The surviving beam is left on :attr:`beam` afterwards, because a windowed
+        search wants every candidate to splice back into the lap and time to the
+        finish, not just the one that got furthest inside the window.
+        """
+        beam = [root]
+        self.beam = beam
         history: list[float] = []
-        best_arc = arc
-        max_depth = max_frames // self.block_frames
+        best_arc = root.arc
 
         for depth in range(max_depth):
             # Two passes over the depth, because a saved state is 24 MB against
@@ -253,6 +274,7 @@ class BeamSearch:
                 break
 
             beam = self._prune_scored(scored, beam)
+            self.beam = beam
             best = beam[0]
             best_arc = max(best_arc, best.arc)
             history.append(best.arc)

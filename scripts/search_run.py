@@ -91,6 +91,12 @@ def parse_args(argv=None):
              "does not lose time evenly -- compare the run against a faster one "
              "and aim at where the gap actually opens",
     )
+    parser.add_argument(
+        "--beam-window", default=None, metavar="FROM,TO",
+        help="with --refine: beam-search this span of the lap in seconds, "
+             "leaving the rest untouched. Finds a different line where "
+             "refinement can only polish the one it was given",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--reserve", type=int, default=4,
@@ -190,6 +196,117 @@ def _refine(args, entry, assets, allowed, started, deadline):
     ).run(seed, iterations=args.iterations)
 
 
+def _beam_window(args, entry, assets, prior, allowed, started, deadline):
+    """Beam-search one stretch of a known lap, then time each line to the finish.
+
+    The middle ground between the two methods that have already failed. Beam
+    search over a whole track lost its entire beam to one corner; refinement
+    polished the policy's line and could not leave it -- four sweeps, a thousand
+    perturbations, three milliseconds. A window does what neither can: it finds a
+    genuinely *different* line through the stretch that is losing time, while the
+    rest of the lap stays exactly as it was.
+
+    The window's own score is arc at equal depth, which is only a proxy for lap
+    time -- carrying more speed out of the window matters more than being a metre
+    further along inside it. So every surviving candidate is spliced back into
+    the lap and run to the finish, which is cheap: the beam already holds its
+    exit state, so a tail costs only the lap after the window.
+    """
+    import time as _time
+
+    from polytrack.actions import ACTION_TO_MASK, mask_to_action
+    from polytrack.physics.wasm import WasmPhysics
+    from polytrack.recording import Recording
+    from polytrack.search import BeamSearch, Candidate, SearchResult
+    from polytrack.tas import TAS, format_time
+    from polytrack.track import ProgressTracker
+
+    lo, hi = (float(x) for x in args.beam_window.split(","))
+    first = int(lo * 1000 / args.block_ms)
+    last = int(hi * 1000 / args.block_ms)
+
+    saved = json.loads(args.refine.read_text())
+    seed_frames = int(saved["frames"])
+    masks = list(Recording.deserialize(saved["recording"]).masks(seed_frames))
+    blocks = [
+        mask_to_action(masks[b * args.block_ms])
+        for b in range(seed_frames // args.block_ms)
+    ]
+    print(f"  beam window {lo:.1f}-{hi:.1f} s of {format_time(seed_frames)} "
+          f"from {args.refine.name}")
+    print(f"  beam {args.beam} (+{args.reserve} reserve), top-{args.top_k}, "
+          f"{last - first} depths\n")
+
+    backend = WasmPhysics(entry.track_code(), assets=assets)
+    tracker = ProgressTracker(entry.line)
+    state = backend.reset()
+    tracker.reset()
+    arc, lateral = tracker.update(state.position)
+    for action in blocks[:first]:
+        result = backend.step_many(ACTION_TO_MASK[action], args.block_ms)
+        state = result.state
+        arc, lateral = tracker.update(state.position)
+    anchor = backend.save_state()
+    print(f"    anchor at {state.frame / 1000:.2f} s, {arc:.1f} m")
+
+    root = Candidate(
+        blob=anchor, frame=state.frame, checkpoint=state.checkpoint, arc=arc,
+        actions=(), position=state.position.copy(),
+        velocity=state.velocity.copy(), state=state, lateral=lateral,
+    )
+    search = BeamSearch(
+        backend=backend, track=entry.line, beam_width=args.beam,
+        block_frames=args.block_ms, prior=prior, top_k=args.top_k,
+        reserve=args.reserve,
+    )
+
+    def on_depth(depth, best):
+        if depth % 10 == 0:
+            print(f"    depth {depth:>3}/{last - first}  {best.arc:7.1f} m  "
+                  f"{(_time.monotonic() - started) / 60:5.1f} min", flush=True)
+        deadline()
+
+    search.descend(root, last - first, on_depth)
+    survivors = search.beam
+    print(f"\n    {len(survivors)} lines through the window; timing each to the "
+          f"finish")
+
+    tail = blocks[last:]
+    best_frames, best_actions = seed_frames, None
+    for i, candidate in enumerate(survivors):
+        backend.load_state(candidate.blob)
+        result = None
+        for action in tail:
+            result = backend.step_many(ACTION_TO_MASK[int(action)], args.block_ms)
+            if result.finished:
+                break
+        if result is not None and result.finished and result.state.frame < best_frames:
+            best_frames = result.state.frame
+            best_actions = list(candidate.actions)
+            print(f"      line {i}: {best_frames / 1000:.3f} s "
+                  f"({best_frames - seed_frames:+,} ms)", flush=True)
+        deadline()
+
+    if best_actions is None:
+        print(f"\n  No line through the window beat {format_time(seed_frames)}.")
+        return SearchResult(
+            tas=None, frames=None, finished=False, n_rollouts=search._rollouts,
+            n_frames_simulated=search._frames, best_arc=0.0,
+            rate=backend.rate,
+        )
+
+    whole = blocks[:first] + best_actions + tail
+    frame_masks = []
+    for action in whole:
+        frame_masks.extend([ACTION_TO_MASK[int(action)]] * args.block_ms)
+    return SearchResult(
+        tas=TAS.from_frame_masks(frame_masks[:best_frames]),
+        frames=best_frames, finished=True, n_rollouts=search._rollouts,
+        n_frames_simulated=search._frames, best_arc=entry.line.length,
+        rate=backend.rate,
+    )
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
 
@@ -241,7 +358,11 @@ def main(argv=None) -> int:
             raise KeyboardInterrupt
 
     try:
-        if args.refine:
+        if args.refine and args.beam_window:
+            result = _beam_window(
+                args, entry, assets, prior, allowed, started, deadline
+            )
+        elif args.refine:
             result = _refine(args, entry, assets, allowed, started, deadline)
         else:
             result = _beam(args, entry, assets, prior, started, deadline)
