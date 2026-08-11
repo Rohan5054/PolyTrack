@@ -636,6 +636,7 @@ class RefinementSearch:
         seed: int = 0,
         actions: tuple[int, ...] | None = None,
         on_progress: Callable[[int, int, int, bool], None] | None = None,
+        focus_blocks: tuple[int, int] | None = None,
     ) -> None:
         self.backend = backend
         self.track = track
@@ -647,6 +648,17 @@ class RefinementSearch:
         #: brakes just wastes evaluations on candidates that will be rejected.
         self.actions = actions or tuple(range(N_ACTIONS))
         self.on_progress = on_progress
+        #: Restrict the sweep to ``[first, last)`` blocks. A uniform sweep spends
+        #: equal effort everywhere, which is the wrong shape: on Winter 5 the
+        #: agent's 395 ms deficit against the human lap is two clusters, 250-500 m
+        #: and 1000-1300 m, and the last third is already dead level. Ninety
+        #: window positions over the opening acceleration found nothing, which is
+        #: exactly what should have been predicted.
+        #:
+        #: Focusing is also cheaper per evaluation, not just better aimed: the
+        #: cost of an attempt is the lap *remaining* after the anchor, so windows
+        #: late in a run are the cheap ones.
+        self.focus_blocks = focus_blocks
         #: How far a candidate may fall behind the incumbent at the same frame
         #: before it is abandoned. Zero would prune lines that dip behind and
         #: come back with more speed in hand, which is most of what a good
@@ -681,6 +693,9 @@ class RefinementSearch:
 
         stride = max(self.window_blocks // 2, 1)
         starts = list(range(0, max(n_blocks - self.window_blocks, 1), stride))
+        if self.focus_blocks is not None:
+            first, last = self.focus_blocks
+            starts = [s for s in starts if first <= s < last] or starts
         # With fewer evaluations than window positions, thin the positions rather
         # than running out partway: a sweep that only ever polishes the first two
         # seconds of a lap is worse than a coarse one that covers all of it.

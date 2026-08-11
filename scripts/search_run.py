@@ -84,6 +84,13 @@ def parse_args(argv=None):
         "--window-blocks", type=int, default=6,
         help="--refine only: how many consecutive blocks a perturbation rewrites",
     )
+    parser.add_argument(
+        "--focus", default=None, metavar="FROM,TO",
+        help="--refine only: restrict the sweep to this span of the lap, in "
+             "seconds. A uniform sweep spends equal effort everywhere, and a lap "
+             "does not lose time evenly -- compare the run against a faster one "
+             "and aim at where the gap actually opens",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--reserve", type=int, default=4,
@@ -149,7 +156,13 @@ def _refine(args, entry, assets, allowed, started, deadline):
     seed_frames = int(saved["frames"])
     masks = list(Recording.deserialize(saved["recording"]).masks(seed_frames))
     seed = TAS.from_frame_masks(masks)
-    print(f"  refining {format_time(seed_frames)} from {args.refine.name}")
+    focus = None
+    if args.focus:
+        lo, hi = (float(x) for x in args.focus.split(","))
+        focus = (int(lo * 1000 / args.block_ms), int(hi * 1000 / args.block_ms))
+
+    print(f"  refining {format_time(seed_frames)} from {args.refine.name}"
+          + (f", focused on {args.focus} s" if focus else ""))
     print(f"  {args.iterations} perturbations, {args.window_blocks} x "
           f"{args.block_ms} ms windows, actions "
           f"{allowed if allowed else 'all 9'}\n")
@@ -173,6 +186,7 @@ def _refine(args, entry, assets, allowed, started, deadline):
         seed=args.seed,
         actions=allowed,
         on_progress=on_progress,
+        focus_blocks=focus,
     ).run(seed, iterations=args.iterations)
 
 
