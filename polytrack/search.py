@@ -59,6 +59,11 @@ class Candidate:
     #: be asked what to try from here. ``None`` when no prior is in use.
     state: object | None = None
     lateral: float = 0.0
+    #: Consecutive blocks this branch has gained no ground. A car in a ditch is
+    #: just a car in a ditch as far as the module is concerned -- it never
+    #: reports ``terminated`` -- so this is the only thing that tells a beam its
+    #: candidate is dead rather than merely slow.
+    stalled: int = 0
 
     @property
     def score(self) -> tuple[int, float]:
@@ -140,6 +145,10 @@ class BeamSearch:
         window: float = 60.0,
         prior: Callable | None = None,
         top_k: int = 3,
+        stall_blocks: int = 8,
+        stall_metres: float = 0.5,
+        reserve: int = 0,
+        reserve_band: float = 8.0,
     ) -> None:
         self.backend = backend
         self.track = track
@@ -151,6 +160,23 @@ class BeamSearch:
         self.window = window
         self.prior = prior
         self.top_k = max(1, int(top_k))
+        #: Drop a branch after this many consecutive blocks gaining less than
+        #: ``stall_metres``. Zero disables it.
+        self.stall_blocks = int(stall_blocks)
+        self.stall_metres = float(stall_metres)
+        #: Extra candidates kept from *behind* the leader, one per
+        #: ``reserve_band`` metres. Zero disables it.
+        #:
+        #: This is insurance against the way beam search actually dies. On
+        #: Winter 5 the whole beam reached 891.8 m and stuck: the trap was a
+        #: corner entered too fast, and every candidate that got there quickest
+        #: got there fastest. Pruning on arc alone actively prefers the doomed
+        #: ones, because a stuck branch *holds* its arc while a slower branch
+        #: that would have survived is simply behind. Reserving a few places for
+        #: candidates further back keeps a slower entry into the same corner
+        #: alive, which is the one thing that gets through it.
+        self.reserve = int(reserve)
+        self.reserve_band = float(reserve_band)
         self._rollouts = 0
         self._frames = 0
 
@@ -202,6 +228,11 @@ class BeamSearch:
                 for action in self._actions_from(parent):
                     outcome = self._simulate(parent, action)
                     if outcome.terminated:
+                        continue
+                    if self.stall_blocks and outcome.stalled >= self.stall_blocks:
+                        # Going nowhere and has been for a while. Left in, it
+                        # keeps its arc and therefore its rank, and crowds out
+                        # branches that are still driving.
                         continue
                     if outcome.finished:
                         finishers.append((outcome.frame, index, action))
@@ -270,6 +301,7 @@ class BeamSearch:
         arc, lateral = self.track.project(
             result.state.position, near_arc=parent.arc, radius=self.window
         )
+        moved = arc - parent.arc >= self.stall_metres
         return Candidate(
             blob=b"",
             frame=result.state.frame,
@@ -282,6 +314,7 @@ class BeamSearch:
             terminated=result.terminated,
             state=result.state,
             lateral=lateral,
+            stalled=0 if moved else parent.stalled + 1,
         )
 
     def _materialise(self, parent: Candidate, action: int) -> Candidate:
@@ -319,6 +352,29 @@ class BeamSearch:
             chosen.append((index, action))
             if len(chosen) >= self.beam_width:
                 break
+
+        if self.reserve and chosen:
+            # Places held for candidates *behind* the leader, one per band, so a
+            # corner that kills everything arriving at full speed still has a
+            # slower arrival left to try. See the note on ``reserve``.
+            leader = scored[0][0].arc
+            picked = set(chosen)
+            bands: set[int] = set()
+            for probe, index, action in scored:
+                if (index, action) in picked:
+                    continue
+                band = int((leader - probe.arc) / self.reserve_band)
+                if band <= 0 or band in bands:
+                    continue
+                key = self._bucket(probe)
+                if key in seen:
+                    continue
+                seen.add(key)
+                bands.add(band)
+                chosen.append((index, action))
+                if len(bands) >= self.reserve:
+                    break
+
         return [self._materialise(beam[i], a) for i, a in chosen]
 
     def _bucket(self, candidate: Candidate) -> tuple:

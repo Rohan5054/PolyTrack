@@ -9,6 +9,8 @@ correct than anything that merely survives a scripted rollout.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 
 from polytrack.actions import ACTION_TO_MASK, N_ACTIONS, Action
@@ -253,6 +255,88 @@ def test_a_guided_search_still_replays_identically():
     assert final is not None and final.finished
     assert final.state.frame == result.frames, (
         f"replay took {final.state.frame} frames, search reported {result.frames}"
+    )
+
+
+def test_a_stalled_branch_is_dropped_rather_than_crowding_the_beam():
+    """How beam search actually died on Winter 5, in miniature.
+
+    The real backend never reports ``terminated`` -- a car in a ditch is just a
+    car in a ditch -- so a wedged branch keeps its arc, keeps its rank, and holds
+    a beam slot forever. The whole beam reached 891.8 m and sat there for twelve
+    seconds of simulated time. Pruning on arc alone cannot notice: a stuck branch
+    *holds* its arc while a branch that gives ground to recover looks worse.
+    """
+    track = chicane_track()
+
+    class Wedged(ReferencePhysics):
+        """Stops dead after a fixed frame, without ever saying so."""
+
+        def __init__(self, track, freeze_at=90):
+            super().__init__(track)
+            self.freeze_at = freeze_at
+
+        def step(self, mask):
+            result = super().step(mask)
+            if result.state.frame >= self.freeze_at:
+                # No terminated flag, no finish -- just no more progress, which
+                # is exactly what the module gives you.
+                result.state = dataclasses.replace(
+                    result.state, position=self._frozen
+                )
+                return result
+            self._frozen = result.state.position.copy()
+            return result
+
+    def cost(stall_blocks):
+        search = BeamSearch(
+            Wedged(track), track, beam_width=6, block_frames=6,
+            stall_blocks=stall_blocks, stall_metres=0.5,
+        )
+        result = search.run(max_frames=1200)
+        assert not result.finished, "the rig cannot finish; the test is wrong"
+        return search._rollouts
+
+    cut, unbounded = cost(4), cost(0)
+    assert cut * 4 < unbounded, (
+        f"stall cut barely helped: {cut} rollouts against {unbounded} without it"
+    )
+
+
+def test_the_reserve_keeps_a_slower_candidate_alive():
+    """Beam width spent entirely on the leaders is what loses the whole beam.
+
+    The Winter 5 trap was a corner entered too fast, so every candidate that got
+    there first got there fastest, and the slower arrival that would have made it
+    had already been pruned. The reserve holds places for candidates behind the
+    leader for exactly that case.
+    """
+    track = chicane_track()
+    plain = BeamSearch(ReferencePhysics(track), track, beam_width=6, block_frames=6)
+    held = BeamSearch(
+        ReferencePhysics(track), track, beam_width=6, block_frames=6,
+        reserve=3, reserve_band=2.0,
+    )
+
+    spans = {}
+    for name, search in (("plain", plain), ("held", held)):
+        # The observable: how much arc the surviving beam covers at each depth.
+        # A plain beam collapses onto the leaders; a reserved one keeps a spread.
+        widths = []
+        original = search._prune_scored
+
+        def measure(scored, beam, _original=original, _widths=widths):
+            kept = _original(scored, beam)
+            _widths.append(max(c.arc for c in kept) - min(c.arc for c in kept))
+            return kept
+
+        search._prune_scored = measure
+        search.run(max_frames=600)
+        spans[name] = float(np.mean(widths))
+
+    assert spans["held"] > spans["plain"] * 1.5, (
+        f"reserve did not spread the beam: {spans['held']:.2f} m against "
+        f"{spans['plain']:.2f} m"
     )
 
 

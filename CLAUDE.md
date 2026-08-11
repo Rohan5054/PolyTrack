@@ -28,7 +28,7 @@ anything.
 ```bash
 pip install -e .[learning]      # torch is training-only; the rest runs without
 python tests/test_core.py       # 24 tests
-python tests/test_search.py     # 12 tests
+python tests/test_search.py     # 14 tests
 python tests/test_trackcode.py  #  7 tests
 python tests/test_wasm.py       # 17 tests
 python tests/test_recording.py  # 14 tests
@@ -38,7 +38,7 @@ python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 111 pass. Four of the suites reach for files that are not in the repo and
+All 113 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —

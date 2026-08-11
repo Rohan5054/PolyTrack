@@ -85,6 +85,12 @@ def parse_args(argv=None):
         help="--refine only: how many consecutive blocks a perturbation rewrites",
     )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--reserve", type=int, default=4,
+        help="beam only: extra candidates kept from behind the leader, one per "
+             "band. Insurance against a corner that kills everything arriving at "
+             "full speed -- which is how the first Winter 5 beam died, at 51%%",
+    )
     return parser.parse_args(argv)
 
 
@@ -96,8 +102,8 @@ def _beam(args, entry, assets, prior, started, deadline):
     from polytrack.search import BeamSearch
 
     depths = args.budget_ms // args.block_ms
-    print(f"  beam {args.beam}, top-{args.top_k}, {args.block_ms} ms blocks, "
-          f"up to {depths} depths\n")
+    print(f"  beam {args.beam} (+{args.reserve} reserve), top-{args.top_k}, "
+          f"{args.block_ms} ms blocks, up to {depths} depths\n")
 
     def on_depth(depth: int, best) -> None:
         if depth % 20 == 0 or depth == depths - 1:
@@ -119,6 +125,7 @@ def _beam(args, entry, assets, prior, started, deadline):
         block_frames=args.block_ms,
         prior=prior,
         top_k=args.top_k,
+        reserve=args.reserve,
     ).run(max_frames=args.budget_ms, on_depth=on_depth)
 
 
