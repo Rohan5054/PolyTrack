@@ -436,6 +436,60 @@ Candidates cross the line at different frames *within* a block, so first-found
 is an ordering accident worth up to a whole block — 50 ms, more than the margin
 these searches are run to find.
 
+### How a beam search dies, and what it cost to learn
+
+The first full run on Winter 5 did not finish. It was *ahead* of the policy
+through the first half — 471.4 m at 8.05 s against the policy's 438.3 m — and
+then the entire beam reached **891.8 m and froze there for the remaining twelve
+seconds** of budget. 1.26 million frames simulated, nothing to show.
+
+Two mechanisms, and the second is the one worth remembering:
+
+* **A restricted action space removes the recovery.** A forward-only car cannot
+  back out of a wall, and the prior returns `-inf` for reverse, so no candidate
+  could ever escape. The restriction that made training work is what made a
+  stuck search state permanent.
+* **Arc-greedy pruning actively prefers the doomed.** The trap was a corner
+  entered too fast, so every candidate that got there first got there fastest.
+  A stuck branch *holds* its arc, while a branch that gives ground to recover
+  looks worse — so pruning on arc alone keeps the dead ones and discards the
+  slower arrival that would have got through.
+
+`stall_blocks` drops a branch gaining nothing, and `reserve` holds places for
+candidates *behind* the leader, one per band. Neither existed for the first run;
+both have tests that reproduce the failure in miniature.
+
+### Refinement
+
+```bash
+python scripts/search_run.py runs/w5-fwd/agent.pt --track "Winter 5" \
+    --refine runs/searched/seed.json --iterations 400 --window-blocks 4
+```
+
+**Prefer this once a finishing lap exists.** Beam search has to re-solve the
+whole track and can lose everything to one corner; refinement starts from a lap
+that works and keeps a change only if the lap got faster, so its output is
+bounded below by its input. It is also local — it polishes the line the policy
+found, and will not discover a different one.
+
+Three things make it affordable on a 19-second lap:
+
+* **Anchors.** The window sweeps in order, so everything before it is frozen and
+  its entry state is saved once and restored per attempt. Polishing the end of a
+  lap costs the end of a lap, not a whole one. This is the port the quarantined
+  package prototyped.
+* **Branch and bound.** Every block is exactly `block_frames` long, so block
+  index and frame line up between candidate and incumbent. Past
+  `abandon_metres` behind at the same frame, nothing later justifies the ten
+  seconds to confirm it. Most perturbations are worse, so this is most of the
+  throughput.
+* **A restricted proposal set.** A lap that never brakes should not spend
+  evaluations proposing brakes.
+
+Thin the window positions rather than truncating them when there are fewer
+evaluations than positions: a sweep that only polishes the first two seconds is
+worse than a coarse one covering the lap.
+
 `scripts/search_demo.py` is unrelated and stays on `ReferencePhysics` and a
 synthetic chicane; it demonstrates the algorithms, not the track.
 
