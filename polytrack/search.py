@@ -181,6 +181,8 @@ class BeamSearch:
         self._frames = 0
         #: The surviving candidates after the last :meth:`descend`.
         self.beam: list[Candidate] = []
+        #: The candidate that crossed the line, if one did.
+        self.winner: Candidate | None = None
 
     def run(
         self,
@@ -268,6 +270,7 @@ class BeamSearch:
                 # are run to find.
                 _, index, action = min(finishers)
                 winner = self._materialise(beam[index], action)
+                self.winner = winner
                 return self._result(winner, history, finished=True)
 
             if not scored:

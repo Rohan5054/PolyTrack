@@ -206,11 +206,17 @@ def _beam_window(args, entry, assets, prior, allowed, started, deadline):
     genuinely *different* line through the stretch that is losing time, while the
     rest of the lap stays exactly as it was.
 
-    The window's own score is arc at equal depth, which is only a proxy for lap
-    time -- carrying more speed out of the window matters more than being a metre
-    further along inside it. So every surviving candidate is spliced back into
-    the lap and run to the finish, which is cheap: the beam already holds its
-    exit state, so a tail costs only the lap after the window.
+    **Set the window to reach the finish.** The window's own score is arc at
+    equal depth, which is only a proxy for lap time, so the honest way to judge a
+    line is to drive the rest of the lap from it. Splicing the seed's remaining
+    inputs back on instead is *open loop* and unsound: those inputs were tuned
+    for the seed's trajectory, and a car nine metres further along at a different
+    heading and speed diverges from them immediately. The first run here did
+    exactly that -- it put the beam 9 m ahead at 14.0 s and then reported every
+    one of the sixteen spliced laps as slower.
+
+    Splicing is kept only for windows that end early, where it is at least a
+    cheap screen, and it says so when it uses one.
     """
     import time as _time
 
@@ -266,13 +272,27 @@ def _beam_window(args, entry, assets, prior, allowed, started, deadline):
                   f"{(_time.monotonic() - started) / 60:5.1f} min", flush=True)
         deadline()
 
+    search.winner = None
     search.descend(root, last - first, on_depth)
-    survivors = search.beam
-    print(f"\n    {len(survivors)} lines through the window; timing each to the "
-          f"finish")
-
     tail = blocks[last:]
-    best_frames, best_actions = seed_frames, None
+
+    if search.winner is not None:
+        # The beam ran all the way to the line. No splice, and no open-loop tail
+        # -- which is the point. Replaying the seed's remaining inputs from a
+        # state the beam has changed is unsound: they were tuned for the seed's
+        # trajectory, and a car nine metres further on at a different heading
+        # diverges from them at once. That is how the first windowed run threw
+        # away a line it had already put 9 m ahead at 14.0 s.
+        best_frames = search.winner.frame
+        best_actions = list(search.winner.actions)
+        print(f"\n    beam reached the line: {best_frames / 1000:.3f} s "
+              f"({best_frames - seed_frames:+,} ms)")
+    else:
+        print(f"\n    {len(search.beam)} lines through the window; splicing each "
+              f"back and timing to the finish")
+        print("    (open-loop tail -- only trustworthy where the window barely "
+              "moved the car)")
+        best_frames, best_actions = seed_frames, None
     for i, candidate in enumerate(survivors):
         backend.load_state(candidate.blob)
         result = None
