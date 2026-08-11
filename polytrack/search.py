@@ -659,6 +659,9 @@ class RefinementSearch:
         #: cost of an attempt is the lap *remaining* after the anchor, so windows
         #: late in a run are the cheap ones.
         self.focus_blocks = focus_blocks
+        #: Share of proposals that hold one action across the whole window rather
+        #: than drawing each block independently. See :meth:`_propose`.
+        self.hold_fraction = 0.5
         #: How far a candidate may fall behind the incumbent at the same frame
         #: before it is abandoned. Zero would prune lines that dip behind and
         #: come back with more speed in hand, which is most of what a good
@@ -718,12 +721,7 @@ class RefinementSearch:
                 if used >= iterations:
                     break
                 candidate = sequence.copy()
-                # Perturb a contiguous window. Contiguity matters: racing inputs
-                # are correlated in time, so scattering single-block mutations
-                # mostly produces noise that any good line immediately rejects.
-                candidate[start : start + span] = self.rng.choice(
-                    self.actions, size=span
-                )
+                candidate[start : start + span] = self._propose(span)
                 key, frames, finished, candidate_trace = self._evaluate(
                     candidate, start, anchor, reference=trace, from_block=start + span
                 )
@@ -763,6 +761,25 @@ class RefinementSearch:
                 for b in range(n_blocks)
             ]
         )
+
+    def _propose(self, span: int) -> np.ndarray:
+        """Actions for one window. Contiguous, and biased toward holding.
+
+        Drawing every block independently is the obvious move operator and it is
+        the wrong one here. Measured on Winter 5: the 19.025 human lap makes 85
+        input changes with a median hold of 102 ms, while the agent's 19.420
+        makes 198 -- it saws at the wheel to stay on line where the human carries
+        one arc. Independent per-block draws generate more sawing, never less, so
+        three sweeps found nothing at all, including ninety attempts aimed
+        squarely at the stretch losing the most time.
+
+        So half the proposals are a single action held across the window. That is
+        the shape of the change that would actually help, and it costs nothing to
+        offer.
+        """
+        if self.rng.random() < self.hold_fraction:
+            return np.full(span, self.rng.choice(self.actions))
+        return self.rng.choice(self.actions, size=span)
 
     def _advance(
         self,

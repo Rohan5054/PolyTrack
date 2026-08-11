@@ -15,7 +15,8 @@ import numpy as np
 
 from polytrack.actions import ACTION_TO_MASK, N_ACTIONS, Action
 from polytrack.physics.reference import ReferencePhysics
-from polytrack.search import BeamSearch, CEMSearch
+from polytrack.search import BeamSearch, CEMSearch, RefinementSearch
+from polytrack.tas import TAS
 from polytrack.track import (
     ProgressTracker,
     chicane_track,
@@ -337,6 +338,91 @@ def test_the_reserve_keeps_a_slower_candidate_alive():
     assert spans["held"] > spans["plain"] * 1.5, (
         f"reserve did not spread the beam: {spans['held']:.2f} m against "
         f"{spans['plain']:.2f} m"
+    )
+
+
+# -- refinement ---------------------------------------------------------------
+
+def _finishing_lap(track):
+    """A lap to polish. Flat-out throttle does not get round the chicane -- that
+    is what ``test_beam_search_beats_flat_out_throttle`` is about -- so this is a
+    beam result, which is also how refinement is actually reached in practice."""
+    result = BeamSearch(
+        ReferencePhysics(track), track, beam_width=16, block_frames=6
+    ).run(max_frames=1800)
+    assert result.finished and result.tas is not None, "no lap to refine"
+    return result.tas, result.frames
+
+
+def test_refinement_never_returns_worse_than_its_input():
+    """The property the whole method rests on, and why it beats beam search here.
+
+    Beam search has to solve the track and can lose everything to one corner.
+    Refinement is bounded below by its seed: a change is kept only if the run got
+    faster, so the worst case is the lap you started with.
+    """
+    track = chicane_track()
+    seed, seed_frames = _finishing_lap(track)
+
+    result = RefinementSearch(
+        ReferencePhysics(track), track, block_frames=6, window_blocks=4, seed=1,
+    ).run(seed, iterations=40)
+
+    assert result.finished
+    assert result.frames <= seed_frames, (
+        f"refinement returned {result.frames} against a seed of {seed_frames}"
+    )
+
+
+def test_refinement_output_replays_identically():
+    """Anchors restore state mid-run, so a lossy restore would show up here.
+
+    Every evaluation after the first resumes from a saved anchor rather than the
+    start line, and the result is a frame-level input list replayed from frame
+    zero. If save/restore were not exact the two would disagree.
+    """
+    track = chicane_track()
+    seed, _ = _finishing_lap(track)
+    result = RefinementSearch(
+        ReferencePhysics(track), track, block_frames=6, window_blocks=4, seed=2,
+    ).run(seed, iterations=40)
+    assert result.tas is not None and result.finished
+
+    clean = ReferencePhysics(track)
+    clean.reset()
+    final = None
+    for mask in result.tas.expand():
+        final = clean.step(mask)
+        if final.finished or final.terminated:
+            break
+    assert final is not None and final.finished
+    assert final.state.frame == result.frames, (
+        f"replay took {final.state.frame}, refinement reported {result.frames}"
+    )
+
+
+def test_refinement_proposes_held_inputs_not_only_noise():
+    """Independent per-block draws were the wrong move operator.
+
+    Measured on Winter 5: the 19.025 human lap makes 85 input changes with a
+    median hold of 102 ms; the agent's 19.420 makes 198 and saws at the wheel.
+    Drawing each block independently generates more sawing, never less, and
+    three sweeps found nothing -- including ninety attempts aimed at the stretch
+    losing the most time.
+    """
+    track = chicane_track()
+    search = RefinementSearch(
+        ReferencePhysics(track), track, block_frames=6, actions=(3, 4, 5), seed=3,
+    )
+    proposals = [search._propose(4) for _ in range(400)]
+    held = sum(1 for p in proposals if len(set(p.tolist())) == 1)
+    # Uniform draws over three actions would hold all four blocks 1 time in 27.
+    assert held > len(proposals) * 0.4, (
+        f"only {held}/{len(proposals)} proposals were a single held input"
+    )
+    assert held < len(proposals) * 0.9, "stopped proposing varied windows at all"
+    assert all(set(p.tolist()) <= {3, 4, 5} for p in proposals), (
+        "proposed an action outside the restricted set"
     )
 
 
