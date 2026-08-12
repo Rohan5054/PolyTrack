@@ -104,6 +104,13 @@ def parse_args(argv=None):
              "five metres up and twenty km/h down, which is behind two seconds "
              "later -- the shape every Winter 5 beam run has shown",
     )
+    parser.add_argument(
+        "--line-weight", type=float, default=0.0, metavar="M",
+        help="beam only: charge this much virtual arc per metre off the "
+             "reference line. Only sound where that line is fast -- on Winter 5 "
+             "it is the 19.025 human lap, and the agent's best wanders 8.3 m "
+             "off it while matching on throttle, slip, contact and steering",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--reserve", type=int, default=4,
@@ -147,6 +154,7 @@ def _beam(args, entry, assets, prior, started, deadline):
         top_k=args.top_k,
         reserve=args.reserve,
         lookahead=args.lookahead,
+        line_weight=args.line_weight,
     ).run(max_frames=args.budget_ms, on_depth=on_depth)
 
 
@@ -272,6 +280,7 @@ def _beam_window(args, entry, assets, prior, allowed, started, deadline):
         backend=backend, track=entry.line, beam_width=args.beam,
         block_frames=args.block_ms, prior=prior, top_k=args.top_k,
         reserve=args.reserve, lookahead=args.lookahead,
+        line_weight=args.line_weight,
         # The seed's own actions from the anchor on. Kept in the beam at every
         # depth, so the search is bounded below by the lap it started from and
         # cannot lose every candidate to a corner the seed drives through.
