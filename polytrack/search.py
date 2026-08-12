@@ -150,6 +150,7 @@ class BeamSearch:
         reserve: int = 0,
         reserve_band: float = 8.0,
         guide: tuple[int, ...] | None = None,
+        lookahead: float = 0.0,
     ) -> None:
         self.backend = backend
         self.track = track
@@ -193,6 +194,17 @@ class BeamSearch:
         #: Carrying it costs one expansion per depth and guarantees the search
         #: can never return worse than what it started from.
         self.guide = guide
+        #: Seconds of speed to credit a candidate, as ``arc + lookahead * speed``.
+        #:
+        #: Arc at equal depth is the honest score for "fastest to here" and it is
+        #: the wrong score for "fastest from here". Every beam run on Winter 5
+        #: showed the same shape: 9 m ahead of the seed at 14.0 s, 22 m ahead at
+        #: 16.0 s, level by 18.0 s. Pruning on arc alone keeps the candidate that
+        #: is five metres up and twenty km/h down, and two seconds later that
+        #: candidate is behind. Crediting a second of speed is a first-order
+        #: estimate of where a candidate will be shortly, which is what the beam
+        #: actually needs to compare.
+        self.lookahead = float(lookahead)
         self._rollouts = 0
         self._frames = 0
         #: The surviving candidates after the last :meth:`descend`.
@@ -317,19 +329,26 @@ class BeamSearch:
             self.beam = beam
             # By score, not position: the guide is inserted at the front and is
             # usually not the furthest-along candidate.
-            best = max(beam, key=lambda c: c.score)
+            best = max(beam, key=self._rank)
             best_arc = max(best_arc, best.arc)
             history.append(best.arc)
             if on_depth is not None:
                 on_depth(depth, best)
 
-        best = max(beam, key=lambda c: c.score) if beam else None
+        best = max(beam, key=self._rank) if beam else None
         if best is None:
             return SearchResult(
                 None, None, False, self._rollouts, self._frames, best_arc,
                 rate=self.backend.rate,
             )
         return self._result(best, history, finished=False)
+
+    def _rank(self, candidate: Candidate) -> tuple[int, float]:
+        """How the beam orders candidates. See :attr:`lookahead`."""
+        if not self.lookahead:
+            return candidate.score
+        speed = float(np.linalg.norm(candidate.velocity))
+        return (candidate.checkpoint, candidate.arc + self.lookahead * speed)
 
     def _actions_from(self, parent: Candidate) -> tuple[int, ...]:
         """Which actions to expand from here -- all of them, or the prior's best."""
@@ -405,7 +424,7 @@ class BeamSearch:
         at the same speed by trivially different routes, and the search explores
         one narrow corridor instead of genuinely different lines.
         """
-        scored.sort(key=lambda item: item[0].score, reverse=True)
+        scored.sort(key=lambda item: self._rank(item[0]), reverse=True)
         chosen: list[tuple[int, int]] = []
         seen: set[tuple] = set()
         for probe, index, action in scored:

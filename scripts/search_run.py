@@ -97,6 +97,13 @@ def parse_args(argv=None):
              "leaving the rest untouched. Finds a different line where "
              "refinement can only polish the one it was given",
     )
+    parser.add_argument(
+        "--lookahead", type=float, default=0.0, metavar="SECONDS",
+        help="beam only: credit a candidate this many seconds of its speed when "
+             "ranking, as arc + lookahead*speed. Arc alone prefers the candidate "
+             "five metres up and twenty km/h down, which is behind two seconds "
+             "later -- the shape every Winter 5 beam run has shown",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--reserve", type=int, default=4,
@@ -139,6 +146,7 @@ def _beam(args, entry, assets, prior, started, deadline):
         prior=prior,
         top_k=args.top_k,
         reserve=args.reserve,
+        lookahead=args.lookahead,
     ).run(max_frames=args.budget_ms, on_depth=on_depth)
 
 
@@ -263,7 +271,7 @@ def _beam_window(args, entry, assets, prior, allowed, started, deadline):
     search = BeamSearch(
         backend=backend, track=entry.line, beam_width=args.beam,
         block_frames=args.block_ms, prior=prior, top_k=args.top_k,
-        reserve=args.reserve,
+        reserve=args.reserve, lookahead=args.lookahead,
         # The seed's own actions from the anchor on. Kept in the beam at every
         # depth, so the search is bounded below by the lap it started from and
         # cannot lose every candidate to a corner the seed drives through.
