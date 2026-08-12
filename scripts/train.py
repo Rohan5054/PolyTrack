@@ -232,6 +232,10 @@ def main(argv=None) -> int:
     episodes: deque = deque(maxlen=100)
     finishes = 0
     best_frames: dict[str, int] = dict(resumed_best)
+    #: Fastest of this sitting, deliberately *not* carried forward: the point is
+    #: to always come away with the best lap the collectors managed, whether or
+    #: not it beat the record.
+    session_best: dict[str, int] = {}
     pending_steps = 0.0
 
     try:
@@ -251,6 +255,27 @@ def main(argv=None) -> int:
                 episodes.append(item)
                 if item.finished:
                     finishes += 1
+                    # Keep the fastest lap of this sitting, not only laps that
+                    # beat the all-time record. The collectors' epsilon noise is
+                    # by far the best lap generator in this repo -- it has
+                    # produced 19.126 on Winter 5 where a policy-guided beam
+                    # search over seven runs and 2.5M simulated frames managed
+                    # 19.405 -- and every one of those laps used to be discarded
+                    # unless it beat the record outright. A search is only as
+                    # good as the line it is seeded from, and this is where the
+                    # good lines come from.
+                    if item.recording and item.frames < session_best.get(
+                        item.track, 1 << 62
+                    ):
+                        session_best[item.track] = item.frames
+                        stem = item.track.replace(" ", "_").lower()
+                        (out / f"fast_{stem}.json").write_text(json.dumps({
+                            "track": item.track,
+                            "frames": item.frames,
+                            "recording": item.recording,
+                            "gradient_steps": agent.steps,
+                            "epsilon": item.epsilon,
+                        }, indent=1))
                     previous = best_frames.get(item.track)
                     if previous is None or item.frames < previous:
                         best_frames[item.track] = item.frames
