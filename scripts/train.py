@@ -236,6 +236,9 @@ def main(argv=None) -> int:
     #: to always come away with the best lap the collectors managed, whether or
     #: not it beat the record.
     session_best: dict[str, int] = {}
+    #: Lowest median finish time seen, for keeping the best checkpoint rather
+    #: than only the most recent one.
+    best_median = float("inf")
     pending_steps = 0.0
 
     try:
@@ -397,6 +400,25 @@ def main(argv=None) -> int:
                     "best": {k: v / 1000.0 for k, v in best_frames.items()},
                 }
                 history.append(row)
+
+                # Keep the best-median checkpoint alongside the latest one.
+                # Training on this project has regressed as well as improved: one
+                # block moved the median +487 ms across its four quartiles, and
+                # because agent.pt is overwritten every save, the policy from
+                # before that block no longer exists anywhere. A second file
+                # costs one write per improvement and makes a bad block
+                # survivable instead of terminal.
+                median = row["finish_median"]
+                if median is not None and median < best_median:
+                    best_median = median
+                    agent.save(out / "best_agent.pt")
+                    (out / "best_agent.json").write_text(json.dumps({
+                        "gradient_steps": agent.steps,
+                        "finish_median": median,
+                        "finish_best": row["finish_best"],
+                        "finish_rate": row["finish_rate"],
+                        "seconds": row["seconds"],
+                    }, indent=1))
                 print(
                     f"  {elapsed / 60:6.1f} min | "
                     f"{agent.steps:>7,} steps ({row['steps_per_second']:.0f}/s) | "
