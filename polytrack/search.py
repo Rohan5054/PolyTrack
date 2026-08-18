@@ -59,6 +59,9 @@ class Candidate:
     #: be asked what to try from here. ``None`` when no prior is in use.
     state: object | None = None
     lateral: float = 0.0
+    #: Input changes along this branch. Every candidate at a depth has the same
+    #: number of blocks, so the counts are directly comparable.
+    switches: int = 0
     #: Consecutive blocks this branch has gained no ground. A car in a ditch is
     #: just a car in a ditch as far as the module is concerned -- it never
     #: reports ``terminated`` -- so this is the only thing that tells a beam its
@@ -152,6 +155,7 @@ class BeamSearch:
         guide: tuple[int, ...] | None = None,
         lookahead: float = 0.0,
         line_weight: float = 0.0,
+        switch_cost: float = 0.0,
     ) -> None:
         self.backend = backend
         self.track = track
@@ -220,6 +224,15 @@ class BeamSearch:
         #: On a track whose reference line came from a mediocre lap this is a
         #: heuristic pulling toward mediocrity, so it defaults off.
         self.line_weight = float(line_weight)
+        #: Metres of virtual arc charged per input change along a branch.
+        #:
+        #: Steering scrubs speed, and the agent saws where the human holds an
+        #: arc: 157 input changes against 85 over the same lap. Where the two are
+        #: on the same line at the same throttle -- within 0.33 m through the
+        #: first 400 m -- the agent is still 1-6 km/h down, and sawing is the
+        #: only variable left. Charging for a change makes the beam prefer the
+        #: candidate that holds its input, which is the shape of the human lap.
+        self.switch_cost = float(switch_cost)
         self._rollouts = 0
         self._frames = 0
         #: The surviving candidates after the last :meth:`descend`.
@@ -360,13 +373,15 @@ class BeamSearch:
 
     def _rank(self, candidate: Candidate) -> tuple[int, float]:
         """How the beam orders candidates. See :attr:`lookahead`."""
-        if not self.lookahead and not self.line_weight:
+        if not (self.lookahead or self.line_weight or self.switch_cost):
             return candidate.score
         value = candidate.arc
         if self.lookahead:
             value += self.lookahead * float(np.linalg.norm(candidate.velocity))
         if self.line_weight:
             value -= self.line_weight * abs(candidate.lateral)
+        if self.switch_cost:
+            value -= self.switch_cost * candidate.switches
         return (candidate.checkpoint, value)
 
     def _actions_from(self, parent: Candidate) -> tuple[int, ...]:
@@ -417,6 +432,9 @@ class BeamSearch:
             state=result.state,
             lateral=lateral,
             stalled=0 if moved else parent.stalled + 1,
+            switches=parent.switches + (
+                bool(parent.actions) and action != parent.actions[-1]
+            ),
         )
 
     def _materialise(self, parent: Candidate, action: int) -> Candidate:

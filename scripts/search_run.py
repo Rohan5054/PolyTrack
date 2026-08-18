@@ -111,6 +111,12 @@ def parse_args(argv=None):
              "it is the 19.025 human lap, and the agent's best wanders 8.3 m "
              "off it while matching on throttle, slip, contact and steering",
     )
+    parser.add_argument(
+        "--switch-cost", type=float, default=0.0, metavar="M",
+        help="beam only: charge this much virtual arc per input change. The "
+             "agent saws where the human holds an arc -- 157 changes against 85 "
+             "-- and steering scrubs speed",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--reserve", type=int, default=4,
@@ -155,6 +161,7 @@ def _beam(args, entry, assets, prior, started, deadline):
         reserve=args.reserve,
         lookahead=args.lookahead,
         line_weight=args.line_weight,
+        switch_cost=args.switch_cost,
     ).run(max_frames=args.budget_ms, on_depth=on_depth)
 
 
@@ -280,7 +287,7 @@ def _beam_window(args, entry, assets, prior, allowed, started, deadline):
         backend=backend, track=entry.line, beam_width=args.beam,
         block_frames=args.block_ms, prior=prior, top_k=args.top_k,
         reserve=args.reserve, lookahead=args.lookahead,
-        line_weight=args.line_weight,
+        line_weight=args.line_weight, switch_cost=args.switch_cost,
         # The seed's own actions from the anchor on. Kept in the beam at every
         # depth, so the search is bounded below by the lap it started from and
         # cannot lose every candidate to a corner the seed drives through.
