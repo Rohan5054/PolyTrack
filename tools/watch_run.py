@@ -277,8 +277,12 @@ def load_saved(path: Path, library_path: Path, track_name: str) -> dict:
     entry = TrackLibrary.load(library_path).by_name(track_name)
     recording = Recording.deserialize(saved["recording"])
     frames = int(saved["frames"])
+    # Either key: the trainer writes "track", this script's own exporter writes
+    # "name", and a run exported here could not be re-installed here without a
+    # hand edit. Accept both rather than making the caller patch a JSON file.
+    name = saved.get("track") or saved["name"]
 
-    print(f"  {saved['track']}: {format_time(frames)} from {path.name} "
+    print(f"  {name}: {format_time(frames)} from {path.name} "
           f"(set at {saved.get('gradient_steps', '?')} gradient steps, "
           f"eps {saved.get('epsilon', 0):.3f})")
 
