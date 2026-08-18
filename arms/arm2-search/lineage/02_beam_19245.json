@@ -1,0 +1,9 @@
+{
+ "track": "Winter 5",
+ "name": "Winter 5",
+ "track_id": "2fe4bd46b0075cc25fc770ce50adbb68447cf493c999635bb272d231811dd264",
+ "frames": 19245,
+ "finished": true,
+ "recording": "eNptkbERwjAMRaUkHBmDiiqVh2AAKipXLiiYgYoBUmkOZqDyKFQMkKPAtrAlBXI-nU5Rnt_9IOTnDODUOfbSBwAqlc9qHks_oXlLdvNWaEvpD5tc70NeiApLVsApFNXrNF878PEot_Dmq8v11MnkPQqNLPPZfznB-jdDpjnF35dJenztZzTyoebzG91cEptQOKRyoPrtUuNlw4aKlrmCt_6y_RNUm_C_aNpp8kDRbpuslxw4YY-iwWLM4f3rkOtOqQLABysRRx0",
+ "source": "beam 24 top-3 50ms guided by agent.pt at 801472 steps"
+}

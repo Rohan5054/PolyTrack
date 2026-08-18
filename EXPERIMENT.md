@@ -6,18 +6,20 @@ from memory or from outside the artifacts in `runs/`.
 
 ## Verified baselines
 
-Every figure below was replayed through `polytrack/verify.py` on a fresh backend
+Official artifacts live in `arms/`, which is version controlled; `runs/` is
+scratch and gitignored. Every figure below was replayed through
+`polytrack/verify.py` on a fresh backend
 and reproduced its own finish frame exactly, passing both checkpoints. Re-run the
 whole table at any time with `scripts/verify_baselines.py`.
 
 | lap | frames | artifact | what it is |
 |---|---|---|---|
 | human PB | 19025 | `records.json` | the run the Winter 5 reference line is derived from |
-| **Arm 1** | **19422** | `runs/exported/winter_5_install.json` | policy alone: best of 20 greedy laps, no search |
-| training harvest | 19249 | `runs/w5-fwd/fast_winter_5.json` | fastest collector episode of a sitting |
-| searched, arc ranking | 19405 | `runs/searched/seed_19405.json` | guided beam, ranked on arc |
-| searched, better seed | 19245 | `runs/searched/seed_19245.json` | guided beam from the 19249 harvest |
-| **Arm 2** | **18786** | `runs/searched/best_18786.json` | guided beam ranked on distance from the reference line |
+| **Arm 1** | **19422** | `arms/arm1-policy/winter_5.json` | policy alone: best of 20 greedy laps, no search |
+| training harvest | 19249 | `arms/arm2-search/lineage/01_training_harvest_19249.json` | fastest collector episode of a sitting |
+| searched, arc ranking | 19405 | `arms/arm2-search/lineage/superseded_beam_19405.json` | guided beam, ranked on arc |
+| searched, better seed | 19245 | `arms/arm2-search/lineage/02_beam_19245.json` | guided beam from the 19249 harvest |
+| **Arm 2** | **18786** | `arms/arm2-search/winter_5.json` | guided beam ranked on distance from the reference line |
 
 Arm 2 stands at **18.786 s**: 239 ms under the human PB and 636 ms under Arm 1.
 

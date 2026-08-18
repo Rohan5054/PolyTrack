@@ -34,12 +34,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 #: (label, artifact, frames to pick when the file holds several runs)
 LAPS = [
     ("human PB", "records.json", 19025),
-    ("Arm 1  policy alone, best-of-20", "runs/exported/winter_5_install.json", None),
-    ("training harvest", "runs/w5-fwd/fast_winter_5.json", None),
-    ("searched, arc ranking", "runs/searched/seed_19405.json", None),
-    ("searched, better seed", "runs/searched/seed_19245.json", None),
-    ("Arm 2  searched, line ranking", "runs/searched/best_18786.json", None),
+    ("Arm 1  policy alone", "arms/arm1-policy/winter_5.json", None),
+    ("  lineage: training harvest",
+     "arms/arm2-search/lineage/01_training_harvest_19249.json", None),
+    ("  lineage: beam from harvest",
+     "arms/arm2-search/lineage/02_beam_19245.json", None),
+    ("Arm 2  policy + guided beam", "arms/arm2-search/winter_5.json", None),
+    ("Arm 3  independent", "arms/arm3-independent/winter_5.json", None),
 ]
+
+#: Arms that have not produced a lap yet are reported, not counted as failures.
+OPTIONAL = {"arms/arm3-independent/winter_5.json"}
 
 #: Frozen for the duration of Phase 2. See EXPERIMENT.md.
 SUBSTRATE = {
@@ -65,8 +70,9 @@ def main() -> int:
     for label, path, pick in LAPS:
         blob = Path(path)
         if not blob.exists():
-            print(f"  {label:<34}{'--':>8}   MISSING {path}")
-            failures += 1
+            state = "not attempted" if path in OPTIONAL else f"MISSING {path}"
+            print(f"  {label:<34}{'--':>8}   {state}")
+            failures += path not in OPTIONAL
             continue
         data = json.loads(blob.read_text())
         if isinstance(data, list):  # records.json holds every track
