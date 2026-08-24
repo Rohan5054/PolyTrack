@@ -120,8 +120,13 @@ def collector_process(
     try:
         import torch
 
+        from ..priority import lift_background_qos
+
         # Before anything allocates a tensor. See the module docstring.
         torch.set_num_threads(1)
+        # Inherited from the learner in the normal case; not free to
+        # assume, and the cost of being wrong is an order of magnitude.
+        lift_background_qos()
 
         from ..library import TrackLibrary
         from ..physics.assets import GeometryAssets

@@ -36,6 +36,7 @@ from polytrack.learning.collector import CollectorConfig, CollectorPool, Episode
 from polytrack.learning.iqn import IQNAgent, IQNConfig
 from polytrack.learning.replay import PrioritisedReplay
 from polytrack.library import TrackLibrary
+from polytrack.priority import lift_background_qos
 
 #: The three throttle actions. Everything else -- coast and brake, straight or
 #: turning -- is removed by ``--forward-only``. Steering is untouched: the claim
@@ -128,6 +129,11 @@ def main(argv=None) -> int:
 
     import torch
 
+    # Before the collectors are spawned, so they inherit it. A run
+    # launched detached is tagged as background work by Windows and
+    # confined to the efficiency cores at their lowest clock: measured
+    # at 14.7x on a fixed single-threaded benchmark.
+    lift_background_qos()
     torch.set_num_threads(args.learner_threads)
 
     if not args.library.exists():

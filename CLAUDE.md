@@ -28,17 +28,17 @@ anything.
 ```bash
 pip install -e .[learning]      # torch is training-only; the rest runs without
 python tests/test_core.py       # 24 tests
-python tests/test_search.py     # 14 tests
+python tests/test_search.py     # 17 tests
 python tests/test_trackcode.py  #  7 tests
 python tests/test_wasm.py       # 17 tests
 python tests/test_recording.py  # 14 tests
 python tests/test_reference.py  # 18 tests
-python tests/test_learning.py   # 19 tests
+python tests/test_learning.py   # 20 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 113 pass. Four of the suites reach for files that are not in the repo and
+All 117 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -80,11 +80,38 @@ aggregate. Budget hours for a first driving policy and days for anything that
 generalises — and note that a 62-float MLP is nowhere near the bottleneck, which
 is why CPU torch is the right build.
 
-Two things in `learning/collector.py` are load-bearing on Windows and all of them
-have cost time somewhere: processes start by **spawn** so nothing is inherited
-and `WasmPhysics` can never cross a process boundary; and torch grabs every core
-per process unless told otherwise, so `set_num_threads(1)` in a worker is not a
-tuning nicety but the difference between six workers and worse-than-one.
+Three things are load-bearing on Windows and all of them have cost time
+somewhere. Two are in `learning/collector.py`: processes start by **spawn** so
+nothing is inherited and `WasmPhysics` can never cross a process boundary; and
+torch grabs every core per process unless told otherwise, so
+`set_num_threads(1)` in a worker is not a tuning nicety but the difference
+between six workers and worse-than-one.
+
+The third is `polytrack/priority.py`, and it is the one that does not look like
+what it is. **Windows confines a detached process to the efficiency cores at
+their lowest clock.** Anything launched in the background -- `nohup`, a
+background shell, a scheduled task -- is tagged with background quality of
+service ("EcoQoS"), and on a hybrid CPU that is not a small penalty:
+**52.6 s against 3.6 s** on a fixed single-threaded benchmark, measured here.
+Every entry point that runs long therefore calls `lift_background_qos()` first
+-- `train.py`, `search_run.py`, and the collector worker.
+
+The symptom is deceptive and cost an afternoon. A tagged training run showed
+every python process pegging the four E-cores at 100% while the eight P-core
+threads sat at 2-24%, **total CPU 29%**, clocks boosting normally at 110% of
+base, no thermal cap, no paging. That reads as "the machine is three-quarters
+idle, so the learner must be blocked on a lock", and it is not: the learner is
+running flat out on a core eight times too slow. The tell is that *everything*
+slows by the same factor at once -- collectors and learner together -- which a
+lock does not do. Measured on this repo: achieved ratio **0.11 -> 0.46** and
+**38 -> 75 transitions/second**, with the gradient step falling from 262 ms to
+roughly 30.
+
+Raising the priority class also lifts the tag, but as a side effect of a
+different mechanism: it is not durable -- Windows re-tags the process within
+minutes, and the ratio oscillates -- and it makes the rest of the machine
+sluggish. `SetProcessInformation(ProcessPowerThrottling)` is the documented
+way, and it is inherited by spawned children.
 
 ## The one thing blocking everything
 

@@ -448,6 +448,25 @@ def test_epsilon_spread_covers_greedy_and_exploratory_actors():
     assert values[-1] < 0.01, "the greediest actor is still mostly random"
     assert all(a > b for a, b in zip(values, values[1:])), "not monotonic"
 
+def test_lifting_background_qos_never_raises_and_reports_honestly():
+    """It is an optimisation, so it must not be able to stop a run starting.
+
+    A detached process on Windows is confined to the efficiency cores at their
+    lowest clock -- 52.6 s against 3.6 s on a fixed single-threaded benchmark.
+    Worth asking for; never worth failing over, which is why this checks the
+    contract rather than the effect.
+    """
+    import sys
+
+    from polytrack.priority import lift_background_qos
+
+    applied = lift_background_qos()
+    assert isinstance(applied, bool)
+    # Idempotent: collectors inherit it and then ask again themselves.
+    assert lift_background_qos() is applied
+    if sys.platform == "win32":
+        assert applied, "the API has been present since Windows 10 1709"
+
 
 if __name__ == "__main__":
     import sys

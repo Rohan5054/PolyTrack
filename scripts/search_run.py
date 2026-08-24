@@ -361,6 +361,11 @@ def main(argv=None) -> int:
     import numpy as np
     import torch
 
+    from polytrack.priority import lift_background_qos
+
+    # A search is normally launched detached and left for half an hour,
+    # which is exactly what Windows tags as background work.
+    lift_background_qos()
     torch.set_num_threads(2)
 
     from polytrack.learning.iqn import IQNAgent
