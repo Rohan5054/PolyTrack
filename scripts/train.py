@@ -319,8 +319,9 @@ def main(argv=None) -> int:
                 # The inner loop advances ``steps`` by up to 64 at a time and this
                 # runs once afterwards, so ``steps % 200 == 0`` was only ever true
                 # when a multiple of 64 happened to land on a multiple of 200 --
-                # every 1600 steps rather than every 200. Under a thermally
-                # throttled learner doing 4.5 steps/s that is a six-minute-old
+                # every 1600 steps rather than every 200. Under a learner
+                # doing 4.5 steps/s -- which is what a background-tagged process
+                # runs at, see polytrack/priority.py -- that is a six-minute-old
                 # policy in every collector, so the buffer fills with exploration
                 # from a network the learner has long since moved past.
                 if agent.steps - last_broadcast >= 200:

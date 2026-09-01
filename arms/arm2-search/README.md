@@ -71,6 +71,30 @@ found the route with help rather than discovering it. On a track whose reference
 line came from a mediocre lap, this term pulls toward mediocrity, which is why it
 defaults to zero.
 
+## Budget consumed
+
+Condition 3 of `EXPERIMENT.md` -- reported in hardware-independent units, so it
+holds however slowly the machine happened to be running.
+
+| | rollouts | simulated frames |
+|---|---|---|
+| the run that produced 18786 (`line1.log`) | 18,309 | 914,944 |
+| its seed, 19245 (`s19249.log`) | 6,993 | 349,600 |
+| **every logged search in the project** | **186,387** | **9,897,112** |
+
+Plus the policy that guided them: `runs/w5-fwd/agent.pt` at **801,472 gradient
+steps**. The 19249 seed cost no search at all -- it is a collector episode, and
+its budget is training.
+
+The project total is a **lower bound**: it sums the 15 logs that carry a
+`frames simulated` line, and runs that stalled or were killed never printed one.
+
+Wall-clock is not the unit for a reason visible in `line1.log` itself: depth 80
+lands at 11.8 min and depth 90 at 36.6 min. Twenty-five minutes vanish mid-run,
+with the rate before and after unchanged -- the machine slept. The frame count
+is untouched by that, and by the efficiency-core throttle described in
+`EXPERIMENT.md` that was in force for all of this.
+
 ## Known remaining loss
 
 Measured against the human lap with `scripts/compare_laps.py`, roughly 150 ms is

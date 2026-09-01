@@ -67,17 +67,32 @@ Lap time here is a count of simulated milliseconds from a deterministic module.
 variable that does not vary, and it standardises the wrong thing: what hardware
 changes is how much search or training fits in an hour.
 
-On the development machine that budget is not stable either. Measured over this
-project: the learner ran at 40 gradient steps/s cold and 4/s thermally throttled,
-a tenfold swing on a roughly six-minute cycle, and one training block lost 87
-minutes to the machine sleeping. "Same laptop" gives two arms very different
-effective budgets depending on time of day.
+On the development machine that budget is not stable either, and the reason
+turned out not to be the one recorded here for weeks. The learner ran at 40
+gradient steps/s in one sitting and 4/s in another, and this document called the
+slow case thermal throttling. It was not. Windows tags a process it considers
+background work -- anything launched detached, which is how every long run here
+was started -- and confines it to the efficiency cores at their lowest clock. On
+a fixed single-threaded benchmark that is **52.6 s against 3.6 s, 14.7x**;
+measured on the training loop, replay ratio 0.11 against 0.46. Clocks were
+boosting at 110% of base throughout, with no thermal or power cap, which is
+precisely why it read as thermal for so long. `polytrack/priority.py` opts out,
+and every long-running entry point calls it.
+
+That correction strengthens the argument rather than weakening it. A 14.7x
+difference in effective budget sat undetected on one machine for weeks, between
+runs, with nothing in any log to show for it. A "same laptop" rule would have
+certified those runs as comparable. One training block also lost 87 minutes to
+the machine sleeping.
 
 So the controlled quantity is hardware-independent and already logged:
 
 * **search** -- `SearchResult.n_frames_simulated`, printed by every run
 * **training** -- `agent.steps`, carried in the checkpoint and in `history.json`
 
+Both survived the throttle untouched: a gradient step is a gradient step and a
+simulated frame is a simulated frame whichever core ran it, so Arm 2's reported
+budget needs no revision even though it was earned at a fraction of the speed.
 Declare a budget per arm, report actual usage, and the comparison reproduces on
 anyone's machine. Running the official numbers on one device is fine as a
 secondary note; it is not the control.

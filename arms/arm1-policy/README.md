@@ -29,6 +29,18 @@ to say so: a 19105 lap was observed once, during training, and lost.
 * 50 ms control interval
 * checkpoint at 717,248 gradient steps
 
+## The guiding checkpoint no longer exists
+
+`runs/w5-fwd/agent.pt` is one mutable file and training continued past this
+point: by the time Arm 2's searches ran, the same path held **801,472** gradient
+steps, and `runs/` is gitignored, so the 717,248 state is gone.
+
+That does not weaken this result -- the lap itself is banked here and reproduces
+its finish frame on a fresh backend, which is the whole claim. It does mean the
+twenty greedy laps cannot be re-drawn from the same network. If a later arm needs
+a like-for-like policy baseline, take it from the checkpoint that arm actually
+used and say which one.
+
 The forward-only restriction is a per-track claim with per-track evidence: the
 19025 human lap holds throttle for 100.0% of its frames and never brakes, while
 every other track in `records.json` brakes for 8-21% of the lap.
