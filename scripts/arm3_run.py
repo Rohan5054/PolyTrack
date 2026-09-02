@@ -35,14 +35,23 @@ def parse_args(argv=None):
     p.add_argument("--knot-spacing", type=int, default=1, help="blocks between knots")
     p.add_argument("--window", type=int, default=40, help="knots optimised at once")
     p.add_argument("--stride", type=int, default=20, help="knots between window starts")
-    p.add_argument("--horizon", type=int, default=150, help="blocks scored per attempt")
+    p.add_argument("--horizon", type=int, default=300, help="blocks scored per attempt")
     p.add_argument("--population", type=int, default=12)
     p.add_argument("--generations", type=int, default=4)
     p.add_argument("--minutes", type=float, default=90.0)
-    p.add_argument("--passes", type=int, default=3)
+    p.add_argument("--passes", type=int, default=8)
+    p.add_argument("--backoff", type=int, default=400,
+                   help="knots to start earlier after a pass that gains nothing")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--resume", type=Path, default=None,
+                   help="knots .npy from an earlier run")
     p.add_argument("-o", "--out", type=Path, default=Path("runs/arm3/winter_5.json"))
     return p.parse_args(argv)
+
+
+#: Metres of arc -- or, once a lap finishes, milliseconds -- that a pass has
+#: to gain before it counts as progress rather than noise.
+MEANINGFUL_GAIN = 1.0
 
 
 def main(argv=None) -> int:
@@ -85,6 +94,13 @@ def main(argv=None) -> int:
         n_blocks=n_blocks, block_frames=block, knot_spacing=args.knot_spacing
     )
     knots = spline.fit(seq)
+    if args.resume is not None and args.resume.exists():
+        loaded = np.load(args.resume)
+        if loaded.shape == knots.shape:
+            knots = loaded
+            print(f"  resuming from {args.resume}")
+        else:
+            print(f"  ignoring {args.resume}: {loaded.shape} != {knots.shape}")
 
     backend = WasmPhysics(entry.track_code(), assets=assets)
     cem = SplineCEM(
@@ -109,18 +125,32 @@ def main(argv=None) -> int:
           f"   [{time.monotonic() - started:.0f}s]", flush=True)
     best_full = baseline
 
+    stalled = 0
     for sweep in range(args.passes):
         if time.monotonic() > deadline:
             break
         print(f"\n  -- pass {sweep + 1} --", flush=True)
-        # Start where the run actually breaks. Sweeping from knot zero spends
-        # most of a pass re-optimising an opening straight that already works.
-        first = max(0, (best_full.peak_block // args.knot_spacing) - args.window)
+        # Start where the run breaks -- sweeping from knot zero spends most of a
+        # pass re-optimising an opening straight that already works -- but back
+        # off further each time a pass gains nothing. The block where progress
+        # *stops* is not the block that caused it: a car that clips a wall keeps
+        # crawling forward for seconds afterwards, so the frontier sits well
+        # past the damage and a sweep anchored there can never undo it. Six
+        # passes of this run started at the same knot 300 past the crash and
+        # returned the same 992.4 m, which is the arc-greedy failure the beam
+        # search hit and is recorded in CLAUDE.md.
+        frontier = best_full.peak_block // args.knot_spacing
+        first = max(0, frontier - args.window - stalled * args.backoff)
         first -= first % args.stride
-        print(f"    sweeping from knot {first} "
-              f"(progress stops at block {best_full.peak_block})", flush=True)
+        # Nothing past the frontier is reachable, so every window there scores
+        # identically and costs a full evaluation to say so.
+        last = min(spline.n_knots - args.window - 1, frontier + 2 * args.window)
+        print(f"    sweeping knots {first}-{last} "
+              f"(progress stops at block {best_full.peak_block}"
+              f"{f', backed off {stalled * args.backoff}' if stalled else ''})",
+              flush=True)
         anchor = None
-        for j in range(first, spline.n_knots - args.window - 1, args.stride):
+        for j in range(first, last, args.stride):
             if time.monotonic() > deadline:
                 print("    budget spent", flush=True)
                 break
@@ -143,8 +173,17 @@ def main(argv=None) -> int:
         tag = (f"FINISH {format_time(full.frames)}" if full.finished
                else f"{full.arc:.1f} m")
         print(f"    end of pass {sweep + 1}: {tag}", flush=True)
+        # "Improved" has to mean improved by an amount worth another pass.
+        # Comparing keys directly made a pass that gained a hundredth of a
+        # millimetre reset the back-off, so the sweep re-ran the same six
+        # unreachable windows instead of moving to where the damage was.
+        gained = (
+            full.key[0] > best_full.key[0]
+            or full.key[1] > best_full.key[1] + MEANINGFUL_GAIN
+        )
         if full.key > best_full.key:
             best_full = full
+        stalled = 0 if gained else stalled + 1
         np.save(args.out.with_suffix(".knots.npy"), knots)
         if full.finished:
             break
