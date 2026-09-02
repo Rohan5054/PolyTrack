@@ -34,11 +34,12 @@ python tests/test_wasm.py       # 17 tests
 python tests/test_recording.py  # 14 tests
 python tests/test_reference.py  # 18 tests
 python tests/test_learning.py   # 20 tests
+python tests/test_spline.py     #  6 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 117 pass. Four of the suites reach for files that are not in the repo and
+All 123 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
