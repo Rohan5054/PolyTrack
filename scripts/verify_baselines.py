@@ -70,7 +70,10 @@ def main() -> int:
     for label, path, pick in LAPS:
         blob = Path(path)
         if not blob.exists():
-            state = "not attempted" if path in OPTIONAL else f"MISSING {path}"
+            state = (
+                "attempted, did not finish -- see the arm's README"
+                if path in OPTIONAL else f"MISSING {path}"
+            )
             print(f"  {label:<34}{'--':>8}   {state}")
             failures += path not in OPTIONAL
             continue

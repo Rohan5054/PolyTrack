@@ -1,0 +1,11 @@
+{
+ "track": "Winter 5",
+ "arm": "arm3-independent",
+ "status": "did not finish",
+ "arc_metres": 1089.3,
+ "track_metres": 1747.0,
+ "stops_at_frame": 19420,
+ "method": "separable CEM over a per-block steering relaxation, no policy",
+ "recording": "eNp1VKFOA0EQfdcWCCcIYgSCXAjq9CnE6uoLQVVXVyDICVR1FaKKz6hAIQlfwTc0BEdC2J3tbt_utpfNZm5uZnbem7dXwT3fwOs5eri1AOa6prrbVwM8XGIAnivnEaADal2iews0wVOTzc6aEg3l-v0TWGv8VeVefZjfZyElOm3KEHK5mSacKGlvB3cJAbHP5aGefbxohzG4L2L40IYw-vi3ah_jYUqRPqesnrC0xPDPKVbARodindZ-D0D6AlRNNrOUTTBbm5T5joq0KSFNcZCdnSiE2EZE0aXMl-c2oew0ZT6bphxSWuzHG_djx8afcm6fX-Bu4rB4SW-DyI16OtWS9Tyd7QJuK_d6PXIpL5Nd_HByQBX1EZ37OTbFFLLcr7H71AY9DKRYSSuYVBuSctIXSua5sNpNQSBHxkm1odRAc4w67KlJCY1JQGFo3CzILthCfWbMeNmblLdFeoStc6EDWumVtF8_RrgZ50Ly1daaNdN9Swf5u7wmsHWqc2s_Vns1ZmI-Rl2GyKQ3XVLNSIFxWSiKVZf9Y2eUOBBqXxPAP-h8Spw",
+ "note": "Not a lap. There is no finish frame, so this cannot go through the gate and is not a result under EXPERIMENT.md."
+}

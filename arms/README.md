@@ -8,7 +8,14 @@ that is not backed by a file in here is not a result.
 |---|---|---|
 | `arm1-policy/` | learned policy alone, no test-time search | 19422 |
 | `arm2-search/` | the same policy plus guided beam search | **18786** |
-| `arm3-independent/` | a separate approach, developed in isolation | -- |
+| `arm3-independent/` | continuous optimisation, no policy | did not finish, 1089 m of 1747 |
+
+Arm 3 was attempted and stalled at 62% of the track for 17.8M simulated
+frames, against the 914,944 that produced Arm 2's finish. A run that never
+crosses the line has no finish frame, so it has no gate result and no row in the
+verified table -- `arms/arm3-independent/partial_1089m.json` is kept to resume
+from, not as a result. It is also not clean-room: same author as Arm 2. Its
+README says both plainly.
 
 Human reference for the track: **19025**, in `records.json` at the repo root.
 That lap is also where the Winter 5 reference line comes from, which matters for

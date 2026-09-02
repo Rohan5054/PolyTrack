@@ -20,6 +20,7 @@ whole table at any time with `scripts/verify_baselines.py`.
 | searched, arc ranking | 19405 | `arms/arm2-search/lineage/superseded_beam_19405.json` | guided beam, ranked on arc |
 | searched, better seed | 19245 | `arms/arm2-search/lineage/02_beam_19245.json` | guided beam from the 19249 harvest |
 | **Arm 2** | **18786** | `arms/arm2-search/winter_5.json` | guided beam ranked on distance from the reference line |
+| Arm 3 | -- | `arms/arm3-independent/partial_1089m.json` | continuous optimisation; reached 1089.3 m of 1747 and did not finish, so it has no gate result |
 
 Arm 2 stands at **18.786 s**: 239 ms under the human PB and 636 ms under Arm 1.
 
@@ -135,11 +136,21 @@ prior, beam anchored in a known lap, carrying that lap as a guide so the result 
 bounded below by its seed, ranked on `arc + lookahead*speed - line_weight*|lateral|`.
 18786.
 
-**Arm 3 -- independent.** Must not consume Arm 2 trajectories, tuned coefficients,
-or checkpoints. Different in kind, not a variation: a different RL algorithm is a
-variation and a reviewer will say so. Genuinely distinct options include geometric
-racing-line optimisation with a tracking controller, continuous trajectory
-optimisation such as CMA-ES over a spline, or behaviour cloning from the human lap
+**Arm 3 -- continuous trajectory optimisation.** Attempted, **did not finish**:
+1089.3 m of 1747. A separable cross-entropy method over a per-block steering
+relaxation, anchored, seeded from the human record. No policy, no checkpoint, no
+Arm 2 artifact. It cost **17,794,080 simulated frames** against the 914,944 that
+produced Arm 2's finish, and it never crossed the line, so there is no gate
+result -- a run with no finish frame is not a result under this protocol. See
+`arms/arm3-independent/README.md` for why the smooth-spline premise failed on
+this track and where the optimiser stalled.
+
+It is also **not clean-room**: it was written by the same author as Arm 2. The
+data rule held -- no Arm 2 trajectory, coefficient or checkpoint is read -- but
+the insight rule could not, and the declaration below applies to it directly.
+
+The two decompositions that remain genuinely independent are a geometric racing
+line with a tracking controller, and behaviour cloning from the human lap
 followed by fine-tuning.
 
 ### Independence has a leak worth declaring
