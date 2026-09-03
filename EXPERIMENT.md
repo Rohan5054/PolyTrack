@@ -117,9 +117,41 @@ assert `hasFinished && frames == targetFrames`.
   splicing, or a search bug. `search_run.py` and `tools/watch_run.py` do this
   automatically.
 
-Describe generated laps as reproduced, not as "validated by the game". For the
-stronger claim, install the ghost with `tools/watch_run.py --game ...` and let the
-real client replay it.
+### The client's own verifier agrees
+
+That weaker claim has since been strengthened by measurement rather than
+argument. `tools/verify_in_client.mjs` loads the shipped
+`simulation_worker.bundle.js` under Node and sends it the same `Init` and
+`Verify` messages the game sends itself:
+
+| lap | frames | the client's verdict |
+|---|---|---|
+| human PB | 19025 | PASS |
+| Arm 1 | 19422 | PASS |
+| **Arm 2** | **18786** | **PASS** |
+
+The worker decodes the track with its own `fromSaveString` and deserialises the
+recording with its own `deserialize`, so this independently exercises
+`polytrack/trackcode.py` and `polytrack/recording.py` as well as the call
+sequence in `polytrack/physics/wasm.py`. Everything this repo wrote between a
+lap file and the module is checked by the game's code.
+
+**It does not independently confirm the physics.** Both sides run the same
+`polytrack_physics.wasm`, hash-identical (`d4ef02676973d41a`). What establishes
+that the physics matches the real game is the acceptance gate, where the target
+frames come from the game's own storage and are an external oracle. The two are
+complementary: the gate says the module reproduces reality, and this says we
+drive the module the way the game does.
+
+One asterisk. `fromSaveString` takes an editor save string, not an exported
+`.track` file, and the two differ by a header carried *inside* the compressed
+payload. The exporter therefore inflates the record, skips the header and
+recompresses the payload bytes unchanged, checking the result back through our
+own decoder first. The client parsed a container we re-encoded, not the original
+file -- which, if anything, exercises the symbol codec harder.
+
+For the strongest claim of all, install the ghost with
+`tools/watch_run.py --game ...` and watch the real client replay it on screen.
 
 **The gate does not check track geometry.** The module has no notion of off-track
 -- a car in a ditch is just a car in a ditch, and it never reports termination.

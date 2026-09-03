@@ -179,6 +179,20 @@ milliseconds early. The game implements this check itself — the `Verify` path 
 `simulation_worker.bundle.js` steps a recording to `targetFrames` and asserts
 `hasFinished && frames == targetFrames` — and `polytrack/verify.py` mirrors it.
 
+The client's own worker also verifies our laps directly. `tools/verify_in_client.mjs`
+runs the shipped `simulation_worker.bundle.js` under Node and sends it the
+`Init` and `Verify` messages the game sends itself; `tools/export_verify_payload.py`
+builds the payload. Winter 5's 19025, 19422 and **18786** all PASS. That checks
+`trackcode.py`, `recording.py` and the `wasm.py` call sequence against the game's
+own code -- but **not** the physics, since both sides run the same module. Three
+things cost time getting it running and are worth knowing before you touch it:
+the bundled js-sha256 takes a Node branch into webpack modules that were stubbed
+out empty, so `process` has to be hidden while the bundle is evaluated; the
+bundle assigns `onmessage` under `"use strict"`, which is a ReferenceError
+unless the property already exists; and `fromSaveString` wants an editor save
+string, so an exported `.track` has to be inflated, stripped of its header and
+recompressed.
+
 **The gate passes, 8 of 8.** Real runs across Summer 1, Summer 5, Desert 3 and
 Winter 5 — played in the game, read out of its local storage — replay here and
 land on their recorded finish frame to the millisecond, up to a 61,428-tick run.

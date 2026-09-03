@@ -2,6 +2,11 @@
 
 **Winter 5: 18786** (`winter_5.json`, gate PASS, both checkpoints)
 
+The game's own `simulation_worker.bundle.js` also verifies it -- its
+decoder, its recording codec, its `Verify` loop. See **The client's own
+verifier agrees** in `EXPERIMENT.md`, including what that does and does
+not establish.
+
 239 ms under the 19025 human lap and 636 ms under Arm 1.
 
 ```bash
