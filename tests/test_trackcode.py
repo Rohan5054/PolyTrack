@@ -15,6 +15,8 @@ times over" is worth more than any assertion written here.
 
 from __future__ import annotations
 
+import collections
+import dataclasses
 import glob
 import os
 import random
@@ -22,6 +24,9 @@ import zlib
 
 from polytrack.trackcode import (
     CHECKPOINT_PART_IDS,
+    Part,
+    TrackCode,
+    encode,
     FINISH_PART_IDS,
     PREFIX,
     START_PART_IDS,
@@ -196,6 +201,114 @@ def test_every_shipped_track_decodes():
         current += 1
     assert current > 0, "no current-format tracks found"
     print(f"        ({current} PolyTrack2 decoded, {legacy} legacy skipped)")
+
+
+# -- encoding ------------------------------------------------------------------
+
+def _bag(parts):
+    """Parts as a multiset. `Part` is frozen but not ordered, and `astuple`
+    carries Nones, so neither sorting nor `<` works on it."""
+    return collections.Counter(dataclasses.astuple(part) for part in parts)
+
+
+def _sample_track(far=True):
+    """A small track exercising a start, a checkpoint and a wide coordinate."""
+    start_id = sorted(START_PART_IDS)[0]
+    checkpoint_id = sorted(CHECKPOINT_PART_IDS)[0]
+    parts = [
+        Part(0, 0, 0, start_id, 0, 0, 3, None, 0),
+        Part(4, 0, 0, 1, 1, 0, 3, None, None),
+        Part(8, 0, 0, checkpoint_id, 2, 0, 3, 0, None),
+    ]
+    if far:
+        parts.append(Part(300, 0, 0, 1, 3, 0, 3, None, None))
+    return TrackCode(
+        parts=tuple(parts), environment=Environment.SUMMER, sun_direction=90,
+        name="Generated", author="tests", last_modified=None, payload=b"",
+    )
+
+
+def test_every_shipped_track_survives_a_re_encode():
+    """Opt-in, and the only version of this test that proves anything.
+
+    A decoder checked against its own encoder proves very little -- the same
+    caveat `_build_code` carries. Re-encoding the real corpus checks the writer
+    against records the game itself produced, and the client's own loader
+    accepts the result: see `tools/verify_in_client.mjs`.
+    """
+    root = os.environ.get("POLYTRACK_TRACKS")
+    if not root:
+        return
+    checked = 0
+    for path in sorted(glob.glob(os.path.join(root, "*", "*.track"))):
+        text = open(path, encoding="utf-8").read().strip()
+        if not text.startswith(PREFIX):
+            continue  # PolyTrack1 and older
+        original = decode(text)
+        again = decode(encode(original))
+        assert again.parts == original.parts, path
+        assert again.environment == original.environment, path
+        assert again.sun_direction == original.sun_direction, path
+        checked += 1
+    assert checked > 0
+
+
+def test_a_generated_track_round_trips():
+    """Every placement survives, though not necessarily in the order given.
+
+    The encoder groups parts by id, so a track built in route order -- ids
+    alternating piece by piece, which is exactly what the generator emits --
+    comes back grouped. Nothing is lost by that: a checkpoint's position in the
+    route is the `checkpoint_order` field, not its index in the tuple.
+    """
+    track = _sample_track()
+    again = decode(encode(track))
+    assert _bag(again.parts) == _bag(track.parts)
+    assert again.environment == track.environment
+    assert again.sun_direction == track.sun_direction
+
+
+def test_a_bare_string_and_an_export_are_different_codes():
+    """Not a prefix apart: the header lives inside the compressed payload.
+
+    Assuming otherwise is what made the client's own loader reject three
+    attempts in a row -- `fromSaveString` reads a save string, and slicing
+    "PolyTrack2" off an export leaves a record whose first byte is a name
+    length where the environment byte should be.
+    """
+    track = _sample_track()
+    bare, export = encode(track), encode(track, header=True)
+    assert not bare.startswith(PREFIX)
+    assert export.startswith(PREFIX)
+    assert export[len(PREFIX):] != bare
+    assert decode(export).name == "Generated"
+    assert decode(export).author == "tests"
+    assert decode(bare).name is None
+
+
+def test_coordinates_pick_the_narrowest_width_that_fits():
+    """A part 300 away needs two bytes per axis; one byte would wrap silently."""
+    wide, narrow = _sample_track(far=True), _sample_track(far=False)
+    assert _bag(decode(encode(wide)).parts) == _bag(wide.parts)
+    assert _bag(decode(encode(narrow)).parts) == _bag(narrow.parts)
+    # The far part forces two bytes per axis, so the wide track costs more.
+    assert len(encode(wide)) > len(encode(narrow))
+
+
+def test_encoding_refuses_a_checkpoint_with_no_order():
+    """The reader always reads an order for these ids, so the writer must always
+    write one. Skipping it does not lose a field -- it shifts every byte after
+    it, so the track decodes to plausible garbage instead of failing."""
+    checkpoint_id = sorted(CHECKPOINT_PART_IDS)[0]
+    broken = dataclasses.replace(
+        _sample_track(),
+        parts=(Part(0, 0, 0, checkpoint_id, 0, 0, 3, None, None),),
+    )
+    try:
+        encode(broken)
+    except TrackCodeError:
+        return
+    raise AssertionError("encoded a checkpoint with no order")
 
 
 if __name__ == "__main__":

@@ -53,37 +53,20 @@ def _bare_save_string(code: str) -> str:
 
     The client's `fromSaveString` takes an editor save string, not an export.
     The two differ by a header that lives *inside* the compressed payload, so it
-    cannot be sliced off the outside -- the record has to be inflated, the
-    header skipped, and the remainder recompressed the way the format nests it:
-    ``symbols(deflate(symbols(deflate(payload))))``.
+    cannot be sliced off the outside.
 
-    Only the container is rebuilt. The payload bytes are the game's own, passed
-    through untouched, and the result is checked back through our decoder before
-    it is used.
+    This goes through `trackcode.encode`, which rebuilds the record from parsed
+    parts rather than passing the game's bytes through. That makes the client's
+    verdict a test of our **encoder** as well: if the worker loads the track and
+    the lap still verifies, every part, rotation, colour, checkpoint order and
+    start order we wrote was written the way the game reads it.
     """
-    import zlib
+    from polytrack.trackcode import decode, encode
 
-    from polytrack.trackcode import (
-        PREFIX, _Reader, _inflate_stages, _read_header, decode, encode_symbols,
-    )
-
-    body = code[len(PREFIX):] if code.startswith(PREFIX) else code
-    raw = _inflate_stages(body)
-    reader = _Reader(raw)
-    if code.startswith(PREFIX):
-        _read_header(reader)
-    payload = raw[reader.offset:]
-
-    inner = encode_symbols(zlib.compress(payload))
-    bare = encode_symbols(zlib.compress(inner.encode("utf-8")))
-
-    # Cheap guard against re-encoding something subtly different.
-    before, after = decode(code), decode(bare)
-    if len(before.parts) != len(after.parts):
-        raise SystemExit(
-            f"  bare re-encode changed the track: {len(before.parts)} parts "
-            f"-> {len(after.parts)}"
-        )
+    track = decode(code)
+    bare = encode(track)
+    if decode(bare).parts != track.parts:
+        raise SystemExit("  re-encode did not round-trip")
     return bare
 
 

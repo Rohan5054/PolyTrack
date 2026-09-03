@@ -399,6 +399,158 @@ def _read_parts(reader: _Reader) -> Iterator[Part]:
             )
 
 
+
+class _Writer:
+    """Little-endian byte sink. The mirror of :class:`_Reader`."""
+
+    __slots__ = ("data",)
+
+    def __init__(self) -> None:
+        self.data = bytearray()
+
+    def u8(self, value: int) -> None:
+        if not 0 <= value <= 0xFF:
+            raise TrackCodeError(f"u8 out of range: {value}")
+        self.data.append(value)
+
+    def u16(self, value: int) -> None:
+        if not 0 <= value <= 0xFFFF:
+            raise TrackCodeError(f"u16 out of range: {value}")
+        self.data += value.to_bytes(2, "little")
+
+    def i32(self, value: int) -> None:
+        if not -(2 ** 31) <= value < 2 ** 31:
+            raise TrackCodeError(f"i32 out of range: {value}")
+        self.data += value.to_bytes(4, "little", signed=True)
+
+    def uint(self, width: int, value: int) -> None:
+        if not 0 <= value < 1 << (8 * width):
+            raise TrackCodeError(f"{value} does not fit in {width} bytes")
+        self.data += value.to_bytes(width, "little")
+
+    def raw(self, chunk: bytes) -> None:
+        self.data += chunk
+
+
+def _width_for(span: int) -> int:
+    """Narrowest coordinate width that holds ``span``. Never zero.
+
+    The format allows one to three bytes and the decoder rejects zero, so a
+    track whose parts all share a coordinate still spends a byte on it.
+    """
+    for width in (1, 2, 3):
+        if span < 1 << (8 * width):
+            return width
+    raise TrackCodeError(f"coordinate span {span} needs more than three bytes")
+
+
+def _write_parts(writer: _Writer, parts: "tuple[Part, ...]") -> None:
+    """Write the delta-encoded part table.
+
+    Parts are grouped by id into runs, which is what makes a code small: the id
+    and the run length are paid once per distinct piece rather than per
+    placement. Grouping order is not load-bearing -- the reader consumes runs
+    until the buffer is empty -- but first-appearance order is preserved so an
+    encode of a decoded track is byte-comparable with its input.
+    """
+    if not parts:
+        raise TrackCodeError("a track needs at least one part")
+
+    origin_x = min(part.x for part in parts)
+    origin_y = min(part.y for part in parts)
+    origin_z = min(part.z for part in parts)
+    width_x = _width_for(max(part.x for part in parts) - origin_x)
+    width_y = _width_for(max(part.y for part in parts) - origin_y)
+    width_z = _width_for(max(part.z for part in parts) - origin_z)
+
+    writer.i32(origin_x)
+    writer.i32(origin_y)
+    writer.i32(origin_z)
+    writer.u8(width_x | (width_y << 2) | (width_z << 4))
+
+    groups: dict[int, list[Part]] = {}
+    for part in parts:
+        groups.setdefault(part.part_id, []).append(part)
+
+    for part_id, group in groups.items():
+        writer.u8(part_id)
+        writer.i32(len(group))
+        for part in group:
+            writer.uint(width_x, part.x - origin_x)
+            writer.uint(width_y, part.y - origin_y)
+            writer.uint(width_z, part.z - origin_z)
+            if not 0 <= part.rotation <= 3:
+                raise TrackCodeError(f"bad rotation {part.rotation}")
+            if not 0 <= part.rotation_axis <= RotationAxis.Z_NEGATIVE:
+                raise TrackCodeError(f"bad rotation axis {part.rotation_axis}")
+            writer.u8(part.rotation | (part.rotation_axis << 2))
+            writer.u8(part.color)
+            if part_id in CHECKPOINT_PART_IDS:
+                if part.checkpoint_order is None:
+                    raise TrackCodeError(
+                        f"part {part_id} is a checkpoint but carries no order"
+                    )
+                writer.u16(part.checkpoint_order)
+            if part_id in START_PART_IDS:
+                if part.start_order is None:
+                    raise TrackCodeError(
+                        f"part {part_id} is a start but carries no order"
+                    )
+                writer.i32(part.start_order)
+
+
+def encode(track: "TrackCode", *, header: bool = False) -> str:
+    """Encode a track. The inverse of :func:`decode`.
+
+    Args:
+        header: Emit a ``PolyTrack2`` export string carrying name, author and
+            timestamp. The default is a **bare save string**, which is what the
+            client's own ``fromSaveString`` reads -- an export carries a header
+            *inside* the compressed payload, so the two are different codes and
+            not a prefix apart.
+
+    The container is rebuilt exactly as the format nests it,
+    ``symbols(deflate(symbols(deflate(record))))``, so anything this produces
+    can be pasted into the game.
+
+    **Part order is normalised**, because parts are grouped by id and the id and
+    run length are paid once per group. Order carries no meaning -- checkpoint
+    sequence is an explicit field, not a position -- and grouping is what keeps
+    a generated track small: laid out along a route the ids alternate
+    constantly, and a run per contiguous group would spend five bytes on every
+    single piece. A track decoded from the game is already grouped, so for those
+    this is an exact inverse.
+    """
+    writer = _Writer()
+    if header:
+        name = (track.name or "Untitled").encode("utf-8")
+        author = (track.author or "").encode("utf-8")
+        if len(name) > 0xFF or len(author) > 0xFF:
+            raise TrackCodeError("name or author too long for the format")
+        writer.u8(len(name))
+        writer.raw(name)
+        writer.u8(len(author))
+        writer.raw(author)
+        if track.last_modified is None:
+            writer.u8(0)
+        else:
+            writer.u8(1)
+            writer.i32(track.last_modified - (1 << 32)
+                       if track.last_modified >= 1 << 31 else track.last_modified)
+
+    if track.environment not in tuple(Environment):
+        raise TrackCodeError(f"unknown environment {track.environment}")
+    if not 0 <= track.sun_direction < 180:
+        raise TrackCodeError(f"sun direction {track.sun_direction} out of range")
+    writer.u8(track.environment)
+    writer.u8(track.sun_direction)
+    _write_parts(writer, track.parts)
+
+    inner = encode_symbols(zlib.compress(bytes(writer.data)))
+    body = encode_symbols(zlib.compress(inner.encode("utf-8")))
+    return (PREFIX + body) if header else body
+
+
 def decode(text: str) -> TrackCode:
     """Decode a ``PolyTrack2`` export string or a bare save string.
 
