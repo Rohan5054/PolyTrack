@@ -423,22 +423,101 @@ Stated plainly, because the result above is easy to over-read:
 - **No comparison to prior work.** Linesight, TMRL and GT Sophy are the
   references the design derives from; nothing here is measured against them.
 
-## Roadmap
+## Where this goes next
 
-1. **Finish the procedural generator.** The encoder is done and the layout works;
-   the turn-placement bug is the blocker. This is what converts four tracks into
-   a distribution and retires the reference-line bootstrap.
-2. **Held-out evaluation.** Train on generated tracks, evaluate on unseen ones,
-   with the four official tracks as a transfer test.
-3. **Baselines with variance.** Several seeds, error bars, at least one standard
-   algorithm besides this IQN.
-4. **The other three tracks**, without `--forward-only` — they brake for 8–21% of
-   the lap and would be unfinishable with it.
+Ordered by what unblocks what, not by appeal.
 
-The largest available speed-up is sample efficiency rather than throughput.
-Episodes re-drive the first half of the track constantly; Linesight starts them
-from points spread along the reference line instead, which needs `save_state` —
-and `save_state` turns out to be affordable, so this is mostly plumbing.
+### 1. Finish the procedural generator — the blocker for everything else
+
+Until it lands, four tracks is a memorisation problem and no generalisation
+claim is available. Two thirds are done: the encoder is validated against the
+game's own loader, and layouts are correct, self-avoiding and drivable when
+they contain no turns.
+
+**The open bug.** A track containing a `TurnSharp` lays out and encodes
+correctly, but the car reaches the first corner and bounces. What is known:
+
+- The start spawns on the first cell facing the second exactly (alignment
+  1.000), so `_HEADINGS` is right.
+- A straight-only track drives to the finish, so starts, straights,
+  checkpoints and finishes are all placed correctly.
+- The road-surface footprint confirms `TurnSharp` opens on local +z and +x and
+  is closed on local −z, which is the connectivity model the walk assumes.
+- The car stops ~1.7 units past the cell boundary it should be entering
+  through, losing wheel contact — consistent with striking a step rather than
+  falling into a void.
+
+What to try next, cheapest first: compare a generated turn against a turn in a
+shipped track at the same rotation, cell-for-cell, since the official tracks are
+known-good layouts; check whether the turn's road surface sits at a different
+height than the straight's at the shared boundary; and consider `TurnShort` or
+`TurnLong` instead, which spread the corner over more than one cell and may be
+what official tracks actually use for connected 90° turns.
+
+### 2. Held-out evaluation
+
+Train on generated tracks, evaluate on unseen generated tracks, and keep the
+four official tracks as a transfer set that was never trained on. This is the
+experiment the whole architecture was designed for and none of it has been run.
+
+### 3. Baselines with variance
+
+Several seeds, error bars, and at least one standard algorithm besides this
+IQN. Every number in `arms/` today is n=1, which is fine for engineering and
+not fine for a claim.
+
+### 4. The other three tracks
+
+Summer 1, Summer 5 and Desert 3, **without** `--forward-only` — they brake for
+8–21% of the lap and would be unfinishable with it.
+
+### 5. Sample efficiency
+
+The largest available speed-up is not throughput. Episodes re-drive the first
+half of the track constantly; Linesight starts them from points spread along the
+reference line instead. That needs `save_state`, and `save_state` turns out to
+be affordable, so this is mostly plumbing.
+
+## Known loose ends
+
+- **`generator.py` turn placement** — the blocker above.
+- **Reward coefficients in `RewardConfig` are placeholders.** There is finally a
+  real backend to tune them against and nobody has.
+- **`ObservationBuilder._cast_rays` approximates the corridor** from the
+  reference line and `Track.width`. With the real backend that measures distance
+  from *the driven lap*, not from a wall — the module has the collision geometry
+  and this should ask it. Isolated in one method for exactly that reason.
+- **47 legacy pre-`PolyTrack2` community tracks still do not decode**, which
+  shrinks the corpus a generator could learn a style from.
+- **`WasmPhysics.save_state` pickles the whole 24 MB heap.** Affordable (13.9 ms)
+  but narrowing it would cut search memory, which is the real constraint.
+- **`quarantine/duplicate_search_package/`** — a second, function-based search
+  implementation written before a module-shadowing collision was noticed. Port
+  its anchored windowed refinement or delete it.
+- **The machine sleeping has damaged five runs.** `powercfg /change
+  standby-timeout-ac 0`. One Arm 3 run lost four hours mid-pass, visible as a
+  jump from 77.3 to 323.4 minutes in its log.
+
+## If this is going to be published
+
+The honest framing is **not** "we beat a human on Winter 5". It is *faithful
+environment construction from a shipped game binary, validated to
+frame-exactness, with a procedural track distribution* — where agent results
+demonstrate the environment is usable rather than carrying the claim.
+
+That framing fits a benchmark/environment venue (NeurIPS Datasets & Benchmarks,
+IEEE Conference on Games, AIIDE, RLC) and the validation standard is the unusual
+asset: most RL environment papers reimplement dynamics and can establish no
+fidelity at all, whereas this one can point at the game's own verifier agreeing.
+
+It needs items 1–3 above, and one thing outside this repo entirely:
+
+**Redistribution.** The environment depends on `polytrack_physics.wasm` and
+geometry derived from it, neither redistributable. *A benchmark nobody can run
+is not a benchmark*, and this is the first question a reviewer will ask. Either
+Kodub grants permission for non-commercial research use, or the
+extract-from-your-own-copy path has to carry the argument. Worth asking early,
+since the answer changes which venues are open.
 
 ## Reproducing this
 
