@@ -589,7 +589,23 @@ synthetic chicane; it demonstrates the algorithms, not the track.
 - The 47 legacy pre-`PolyTrack2` community tracks still do not decode, which
   shrinks the corpus the generator can learn a style from.
 
-## Leaderboard etiquette
+## Permission and leaderboard etiquette
+
+**Kodub has confirmed that using the physics WASM directly is fine** (Discord,
+8 September 2026), pointing at section 4 of
+https://www.kodub.com/terms/polytrack and asking for two things: that people
+cannot cheat using the tool, and that it does not upload runs to the
+leaderboard. Both hold by construction -- `tools/watch_run.py` serves the client
+on a throwaway `http://127.0.0.1` origin and hooks `fetch` and
+`XMLHttpRequest.open` to reject `vps.kodub.com`, `leaderboard` and `/api/`.
+Do not weaken either guard.
+
+That permission covers **use**, not **redistribution**. Section 4 governs mods
+and reuploads and does not address shipping an extracted `.wasm` in a research
+repo, so the game-derived files stay out of git until that is asked explicitly.
+
+Attribution is now a requirement rather than a courtesy: credit Kodub, link the
+official CrazyGames page, state that this is unofficial and non-commercial.
 
 Keep bot and TAS runs off the human leaderboard. Linesight states the rule
 plainly for Trackmania: their runs are tool-assisted and must not be submitted

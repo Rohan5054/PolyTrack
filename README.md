@@ -513,11 +513,20 @@ fidelity at all, whereas this one can point at the game's own verifier agreeing.
 It needs items 1–3 above, and one thing outside this repo entirely:
 
 **Redistribution.** The environment depends on `polytrack_physics.wasm` and
-geometry derived from it, neither redistributable. *A benchmark nobody can run
-is not a benchmark*, and this is the first question a reviewer will ask. Either
-Kodub grants permission for non-commercial research use, or the
-extract-from-your-own-copy path has to carry the argument. Worth asking early,
-since the answer changes which venues are open.
+geometry derived from it. *A benchmark nobody can run is not a benchmark*, and
+this is the first question a reviewer will ask.
+
+Half of this is now settled: Kodub has confirmed that **using** the physics WASM
+directly is fine, under the conditions in
+[Permission, attribution, and the leaderboard](#permission-attribution-and-the-leaderboard).
+That removes any doubt about the project's legitimacy and makes the
+extract-from-your-own-copy path a sanctioned one.
+
+What is still open is **redistribution** — shipping the module inside the repo
+so a reviewer can `pip install` and run. The ToS does not address it, and the
+permission given was to use. Until that is asked and answered, reproduction
+requires a copy of the game, which is a weaker story than a benchmark venue
+usually wants.
 
 ## Reproducing this
 
@@ -550,15 +559,51 @@ The substrate every result above was produced against, frozen and checked by
 **This is the open reproducibility problem.** A benchmark nobody else can run is
 not a benchmark, and the extraction path requires a copy of the game.
 
-## A note on leaderboards
+## Permission, attribution, and the leaderboard
+
+**PolyTrack is by [Kodub](https://www.kodub.com/). Play the official game at
+[CrazyGames](https://www.crazygames.com/game/polytrack).** This project is an
+unofficial research tool. It is not affiliated with, endorsed by, or sponsored
+by Kodub.com, CrazyGames, Poki or itch.io, and it is entirely non-commercial.
+
+Kodub was asked directly before any of this was published, and replied
+(Discord, 8 September 2026):
+
+> Using the physics WASM directly should be fine! Please read section 4 of the
+> Terms of Service here for details […] Also, please make sure people can't
+> cheat using the tool, and that it doesn't upload runs to the leaderboard.
+
+Both conditions are met by construction, not by promise:
+
+- **`tools/watch_run.py` cannot reach the leaderboard.** It serves your own copy
+  of the client over `http://127.0.0.1`, and hooks both `window.fetch` and
+  `XMLHttpRequest.prototype.open` to reject any request matching
+  `vps.kodub.com`, `leaderboard` or `/api/`. The page carries a visible banner
+  saying uploads are blocked.
+- **It cannot touch your real save.** `http://127.0.0.1` is a different origin
+  from the Electron app's `file://`, so the served copy gets its own empty local
+  storage. Your personal bests are never read, written or reachable. A fresh
+  origin also has no session to upload with — the request block is belt and
+  braces on top of that.
+- **Nothing in this repo makes an outbound request to Kodub's servers.** The
+  only HTTP is a localhost server for your own client copy. `vps.kodub.com`
+  returns 403 on every path for this client; that is an answer, not an obstacle
+  to route around.
 
 Keep bot and TAS runs off the human leaderboard. Linesight states the rule
-plainly for Trackmania: their runs are tool-assisted and must not be submitted to
-official leaderboards. The PolyTrack community draws the same line.
+plainly for Trackmania: their runs are tool-assisted and must not be submitted
+to official leaderboards. The PolyTrack community draws the same line, and
+[section 2 of the ToS](https://www.kodub.com/terms/polytrack) prohibits
+submitting manipulated records outright.
 
-Check Kodub's current Terms of Service before submitting anything — the game
-added a ToS in v0.6.0 and enforces server-side replay verification. Label runs
-clearly as TAS/AI and you will get help from the Discord rather than a ban.
+### What is still an open question
 
-`vps.kodub.com` returns 403 on every path for this client. That is an answer, not
-an obstacle to route around.
+Kodub's answer grants **use**. It does not settle **redistribution**, and ToS
+section 4 does not address it either — that section governs mods and reuploads
+of the game, and an extracted `.wasm` shipped inside a research repo is neither.
+
+So `polytrack_physics.wasm`, `geometry.npz` and `tracks.npz` stay out of this
+repository until that is asked and answered explicitly. Extract them from a copy
+you own; see [Reproducing this](#reproducing-this). This is the open
+reproducibility problem, and it is a question for Kodub rather than something to
+decide unilaterally.
