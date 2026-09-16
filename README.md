@@ -4,44 +4,67 @@ An RL + trajectory-search agent for PolyTrack, built on the design the research
 review landed on: **a learned policy for generalisation, test-time search for the
 last tenths.**
 
+## Where this stands
+
+**Winter 5, 18.786 s** — 239 ms faster than the human personal best this project
+was measured against (19.025), and 636 ms faster than the same policy driving
+without search (19.422). It reproduces its finish frame exactly on a fresh
+backend, and **the game's own simulation worker agrees**.
+
+| | Winter 5 | verified by |
+|---|---|---|
+| human PB | 19.025 | the game's own storage (external oracle) |
+| Arm 1 — policy alone | 19.422 | gate + client worker |
+| **Arm 2 — policy + guided beam** | **18.786** | gate + client worker |
+| Arm 3 — continuous optimisation | did not finish, 1089 m of 1747 | n/a — no finish frame |
+
+That is one track. See [What this does not show](#what-this-does-not-show).
+
 ## Status
 
 | Component | State |
 |---|---|
 | Discrete action space | Done |
 | `.tas` format read/write | Done |
-| Track code decoder (`PolyTrack2`) | Done |
+| Track code **decoder** (`PolyTrack2`) | Done |
+| Track code **encoder** | Done — 31/31 shipped tracks re-encode exactly |
 | Recording / ghost codec | Done |
 | Track geometry, windowed projection | Done |
 | Sophy-style observation builder | Done |
-| Reward function | Done — coefficients still placeholders |
+| Reward function | Done — every term non-negative, see below |
 | Gymnasium environment | Done — runs on real physics |
-| Reference stand-in physics | Done — retained for tests only |
+| Reference stand-in physics | Retained for tests only |
 | **Real WASM physics backend** | **Done. Acceptance gate passes, 8/8** |
+| **Verification by the client's own worker** | **Done — 3/3 laps PASS** |
 | Reference lines from real runs | Done |
-| Search layer (beam / CEM / refinement) | Done — validated on the stand-in |
-| IQN training loop | Done — **but nothing has been trained yet** |
-| Procedural track generator | Not started |
-| Policy-guided search | Not started |
+| Search layer (beam / CEM / refinement) | Done — beat the human PB |
+| Policy-guided search | Done — this is where 18.786 came from |
+| IQN training loop | Done — **860,000 gradient steps run** |
+| Windows efficiency-core mitigation | Done — `polytrack/priority.py` |
+| Three-arm comparison protocol | Done — `EXPERIMENT.md`, `arms/` |
+| **Procedural track generator** | **In progress — layout works, drivability bug open** |
 
-102 tests passing. Four suites reach for files not in the repo and are stronger
-when they find them; without them they skip and say so.
+**137 tests passing.** Four suites reach for files not in the repo and are
+stronger when they find them; without them they skip and say so.
 
 ## Quick start
 
 ```bash
 pip install -e .[learning]      # torch is training-only
 python tests/test_core.py       # 24
-python tests/test_search.py     #  9
-python tests/test_trackcode.py  #  7
+python tests/test_search.py     # 17
+python tests/test_trackcode.py  # 12
 python tests/test_wasm.py       # 17  (needs the game files)
 python tests/test_recording.py  # 14
-python tests/test_reference.py  # 17  (needs the game files)
-python tests/test_learning.py   # 14  (needs torch)
+python tests/test_reference.py  # 18  (needs the game files)
+python tests/test_learning.py   # 20  (needs torch)
+python tests/test_spline.py     #  6
+python tests/test_generator.py  #  9
 python scripts/smoke_test.py
+python scripts/verify_baselines.py   # re-verify every banked lap + substrate
 ```
 
-## Stage 0 is done
+## Stage 0: the acceptance gate
 
 The gate was: **replay a known recording through the backend and reproduce its
 finish frame exactly.** Not approximately — a simulator 0.01% off finishes a
@@ -57,46 +80,93 @@ python tools/extract_records.py -o records.json
 POLYTRACK_TRACKS=path/to/tracks python scripts/run_gate.py records.json
 ```
 
-Two files the backend needs are **not in this repo**, because both derive from
-Kodub's game: `polytrack_physics.wasm` and `geometry.npz`. Extract them from a
-build you own and keep them local. The collision geometry is *captured, not
-reimplemented* — `tools/capture_geometry.py` serves your local client over
-127.0.0.1 and intercepts the `Init` message it sends its simulation worker, which
-carries every part's collision mesh. See CLAUDE.md for why that replaced a
-185-of-186 reimplementation.
+### The client's own worker verifies our laps too
 
-Pin game version **0.6.2**. Replays, track codes and times are all
-version-sensitive, and the worker throws on a mismatch.
+The gate proves the *simulator* reproduces reality, because a human record's
+target frame comes from the game and is an external oracle. For a lap this
+project **generated**, the target is our own search's claim — so a gate PASS
+means "these inputs reproduce that frame here", and "the game would agree" was
+an inference.
 
-## Reference lines
-
-A track code is a pile of placed parts. It says exactly where every piece of road
-is and nothing at all about the route through them. So the route comes from a lap
-that was actually driven: replay a recording through the verified backend, sample
-where the car went, resample at fixed arc spacing.
+`tools/verify_in_client.mjs` measures it instead. It runs the shipped
+`simulation_worker.bundle.js` under Node and sends it the `Init` and `Verify`
+messages the game sends itself:
 
 ```bash
-POLYTRACK_TRACKS=path/to/tracks python scripts/reference_demo.py records.json
+python tools/export_verify_payload.py -o runs/client_check.json
+node tools/verify_in_client.mjs --game path/to/extracted/app \
+     --payload runs/client_check.json
 ```
 
-```
-  Winter 5
-    recorded    0:19.025  (996 samples, built in 46.0s)
-    line        1747.0 m over 875 points, 3 checkpoints
-    pace        331 km/h average, 482 km/h peak
-```
+19025, 19422 and 18786 all PASS. The worker decodes the track with its own
+`fromSaveString` and deserialises the recording with its own `deserialize`, so
+this independently exercises `trackcode.py` and `recording.py` alongside the
+`wasm.py` call sequence — everything written here between a lap file and the
+module.
 
-This is Linesight's design, and the same caveat applies: it is a *reference line*,
-not a centerline, so "lateral offset" means distance from that lap. It stops
-being a constraint at the procedural generator, which knows each track's route by
-construction and needs no lap driven for it.
+**It does not confirm the physics.** Both sides run the same
+`polytrack_physics.wasm`, hash-identical. The gate remains the only thing that
+can say the module matches the real game. The two are complementary: the gate
+says the module reproduces reality, this says we drive the module the way the
+game does.
+
+## Results, and the protocol behind them
+
+`EXPERIMENT.md` is the protocol; `arms/` holds the artifacts, version
+controlled, unlike `runs/` which is scratch and gitignored. **A number not
+backed by a file in `arms/` is not a result.**
+
+Three approaches to the same track:
+
+- **Arm 1 — policy alone.** IQN, forward-only action space, best of 20 greedy
+  laps, no test-time search. **19.422.**
+- **Arm 2 — policy plus guided beam.** The same checkpoint as an action prior,
+  the beam anchored in a known lap and carrying it as a guide so the result is
+  bounded below by its seed, ranked on
+  `arc + lookahead·speed − line_weight·|lateral| − switch_cost·switches`.
+  **18.786.**
+- **Arm 3 — continuous trajectory optimisation.** A separable cross-entropy
+  method over a per-block steering relaxation, anchored, seeded from the human
+  record. No policy, no checkpoint, no Arm 2 artifact. **Did not finish**, 1089 m
+  of 1747, for 17,794,080 simulated frames.
+
+Budgets are reported in hardware-independent units, which is the whole reason
+the protocol rejects a single-device rule:
+
+| | rollouts | simulated frames |
+|---|---|---|
+| the run that produced 18786 | 18,309 | 914,944 |
+| its 19245 seed | 6,993 | 349,600 |
+| every logged search in the project | 186,387 | 9,897,112 |
+| Arm 3, all runs | 10,111 | 17,794,080 |
+
+Arm 3 spent nineteen times the winning run's budget and never crossed the line.
+
+### Three caveats that belong in any write-up
+
+**Arm 1 is 19.422, not the 19.105 in the logs.** A 19.105 episode was observed
+once during training, but record laps were only written to disk when they beat
+the all-time best, so its inputs were discarded and no recording survives. It
+cannot be replayed or gate-checked. 19.422 is slower, which makes Arm 2's gain
+look larger — so say so.
+
+**Arm 2 was steered toward a human racing line.** The Winter 5 reference line
+*is* the 19.025 human lap, and `line_weight` charges candidates for distance
+from it. That term found 459 ms in one run where seven runs ranking on arc alone
+had found 14 ms in total. The control sequence is the agent's own and drives
+that route 239 ms faster than the human did — but it found the route with help.
+
+**Arm 3 is not clean-room.** Same author as Arm 2. The data rule held (no Arm 2
+trajectory, coefficient or checkpoint is read) but the insight rule could not:
+Arm 2 established by measurement that the entire Winter 5 deficit is *route*,
+and that shaped what was built.
 
 ## Training
 
 ```bash
 POLYTRACK_TRACKS=path/to/tracks python scripts/build_library.py   # once, ~3 min
 python scripts/train.py --smoke                                   # 90 s
-python scripts/train.py --workers 6
+python scripts/train.py --workers 6 --track "Winter 5" --forward-only
 ```
 
 IQN — distributional Q-learning — with prioritised replay, 5-step returns and
@@ -109,11 +179,131 @@ Distributional matters for racing specifically. Committing to a corner at speed
 either works or puts the car into a wall, and a mean Q-value of those two futures
 describes neither. A quantile critic can represent "usually 90, occasionally 5".
 
-**Nothing has been trained past a smoke run yet.** For scale: trivial policies
-reach 3–15% of a lap and a random one reaches 0.1%, so the reward discriminates —
-whether it discriminates all the way to a finish is the open question. And with
-only four reference lines this is a memorisation problem until the procedural
-generator lands.
+**860,000 gradient steps have been run** on Winter 5 with `--forward-only`. The
+policy finishes the lap reliably and its best greedy lap is 19.422. A later run
+retrained against a reference line rebuilt from the 18.786 lap rather than the
+human one; it reached a 19.286 collector lap in ~72k steps and was stopped
+without beating the original.
+
+Watch three things: `ratio` (achieved gradient steps per transition — under ~0.3
+and the learner is wasting most of what the collectors produce), `lap`, and the
+`failures` histogram. All `off_line` means the car cannot hold the track; all
+`stalled` means it cannot leave the line; a sudden flip between them at zero
+progress means the reward is being gamed.
+
+### Why no reward term may be negative
+
+The hardest-won rule here, learned from a real run rather than from reasoning.
+
+The first reward charged a per-second time penalty and forfeited part of the
+un-driven lap on failure. Twelve minutes of training broke it: with the episode
+over, a failure costs a fixed amount whenever it arrives while staying alive
+keeps paying the clock, so **the fastest possible failure wins**. The agent
+learned to drive sideways off the start line — failures went from 74% `stalled`
+to 88% `off_line`, mean return improved, progress fell to zero. It was
+optimising correctly; the objective was wrong.
+
+The obvious repair, charging the full time budget on failure, inverts the exploit
+rather than fixing it: discounting shrinks any large terminal penalty, so
+stalling eight seconds before failing beats failing at once, and the agent learns
+to sit still.
+
+With every term non-negative, a terminal state is worth zero and continuing is
+worth at least zero, so quitting is never strictly better — for any policy, any
+discount, anywhere on the track. Time pressure comes from the finish bonus,
+scaled by `par / elapsed`. `RewardConfig.time_penalty` exists and **defaults to
+0**; every positive value reopens the exploit in proportion to its size.
+
+The corollary: **encode certainty as a constraint, uncertainty as a reward.**
+Since no term may be negative, "stop doing X" cannot be expressed as a penalty at
+all — so when you are confident an action is never right, remove it from the
+action space. `--forward-only` is the one use so far, and it is a *per-track*
+claim with per-track evidence: the 19.025 Winter 5 lap holds throttle for 100.0%
+of its frames and never brakes, while every other track in `records.json` brakes
+for 8–21% of the lap.
+
+## Search
+
+```bash
+python scripts/search_run.py runs/w5-fwd/agent.pt --track "Winter 5" \
+    --refine seed.json --beam-window 8.0,21.0 \
+    --beam 20 --top-k 3 --reserve 5 --lookahead 1.0 --line-weight 1.0
+```
+
+**Score on progress at equal depth, never on reward.** Every candidate at a given
+depth has burned exactly the same number of frames, so "furthest along the track"
+*is* "fastest to here". No coefficients, and none of the exploits that make
+search such an adversarial consumer of a shaped reward.
+
+Three things make a beam across a whole lap affordable:
+
+- **`save_state` is cheap.** 13.9 ms in the original measurement, ~26 ms on a
+  loaded machine — against 23–52 s to replay a 19-second lap from frame zero.
+  This file previously recorded it as "far too slow for beam search", which had
+  never been measured. Measure before designing around a cost.
+- **The prior.** Nine actions five blocks ahead is 59,049 futures; the policy's
+  top three is 243, and they are 243 the policy thinks are drivable.
+- **Bounded memory, two passes per depth.** Scoring children with their 24 MB
+  states attached holds `beam × top_k` at once. Pass one keeps only the numbers,
+  pass two re-runs the survivors. A third more simulation, peak memory halved.
+  Sound only because the backend is exactly deterministic across save/restore.
+
+**Always carry a guide**, and **run the window to the finish; never splice.**
+Both were learned by breaking them: without a guide the beam prunes on arc, fills
+with the branches carrying most speed, and dies when a corner punishes all of
+them at once — 891.8 m on a whole-track run, 1362 m on a windowed one. Splicing
+a seed's remaining inputs after a window that moved the car is open-loop and
+unsound; the first windowed run put the beam 9 m ahead at 14.0 s and then
+reported all sixteen spliced laps as slower.
+
+**Cost is proportional to (finish − anchor), so work backwards.** A late window
+is cheap, an early one expensive, and an early anchor subsumes every later one.
+
+### How the 459 ms was actually found
+
+Seven searches ranking on arc alone found 14 ms in total. The breakthrough came
+from measuring rather than theorising: a report that the car was "skidding" was
+**disproved** — `wheel_skid_info` saturates at 4.000 on both laps (it is a
+visual-effects flag, not physics), slip was 0.25° against 0.31°, collision
+impulse zero on both, throttle 100% on both, steering effort 0.011 against 0.013.
+
+What was left was the *route*. The agent drove 6.2 m further and wandered 8.3 m
+off the reference line, mean offset 2.16 m. Adding `line_weight` to the ranking
+found **459 ms in one run**. Four further searches afterwards returned +0 ms, and
+a fifth — against a reference line rebuilt from the 18.786 lap itself — returned
+a file byte-identical to its seed. Search against this policy has converged.
+
+## Procedural track generator — in progress
+
+The roadmap item that matters most, and the one that would make this
+generalisation rather than memorisation. Two thirds exist:
+
+- **`trackcode.encode`** — done and validated three ways. Every shipped track
+  that decodes at all (31 of 31) re-encodes to the same parts, environment and
+  sun direction; the client's own worker loads a Winter 5 rebuilt from parsed
+  parts and all three banked laps still verify frame-exactly on it; five unit
+  tests cover the edges.
+- **`polytrack/generator.py`** — lays out self-avoiding grid walks with starts,
+  straights, sharp turns, checkpoints and a finish, and returns the route by
+  construction. Every constant was measured, not guessed: `PART_SIZE` is 5 and a
+  `Straight` is 20 world units, so a piece spans exactly four grid units, which
+  is why every coordinate in a shipped track is a multiple of four.
+- **What does not work yet.** A straight-only generated track drives and
+  finishes. A track with turns does not: the car reaches the first corner and
+  bounces. The road-surface footprint confirms `TurnSharp` opens on local +z and
+  +x exactly as modelled, so something in the placement is still wrong. An
+  earlier adjacency check that appeared to pass was measuring vertex extent
+  rather than openness and proved nothing.
+
+`tests/test_generator.py` pins the half that works, including a straight-only
+track driven end to end on the real module. It deliberately does not assert the
+turn failure — that is the open bug, not a property to lock in.
+
+One earlier check is worth recording as a warning: an adjacency test measuring
+how far each piece's vertices reached along the connecting direction reported
+"0 broken connections" on a track the car could not drive. It was measuring
+extent, not openness — a barrier reaches a boundary exactly as well as an
+opening does — so it confirmed nothing while looking like proof.
 
 ## Architecture
 
@@ -121,13 +311,16 @@ generator lands.
 polytrack/
   actions.py      9 discrete actions; opposing inputs cancel (per v0.6.0)
   tas.py          .tas read/write; carries explicit run length
-  trackcode.py    PolyTrack2 code -> placed parts -> physics buffer
+  trackcode.py    PolyTrack2 code <-> placed parts -> physics buffer
   track.py        Track geometry, ProgressTracker, reference-line resampling
   observation.py  Sophy-style observation vector (62 floats)
-  env.py          Gymnasium env; progress reward + time penalty
+  env.py          Gymnasium env; progress reward, no negative terms
   reference.py    replay -> trajectory -> reference line -> environment
   library.py      tracks.npz: track code + reference line + par time, cached
-  search.py       BeamSearch, CEMSearch, RefinementSearch
+  search.py       BeamSearch (+ policy prior), CEMSearch, RefinementSearch
+  spline.py       Arm 3: steering relaxation + separable CEM
+  generator.py    procedural layout (in progress, uncommitted)
+  priority.py     Windows efficiency-core opt-out
   learning/
     replay.py     sum-tree prioritised replay + n-step returns
     iqn.py        the quantile critic, its loss, and the agent
@@ -151,72 +344,132 @@ and never touches a simulator directly.
 PolyTrack frame is **one millisecond** — the physics runs at 1000 Hz, not the
 60 Hz this project assumed until the real backend was built. Wall-clock never
 enters the simulation. This is what makes runs reproducible and what made
-Polybot's screen-scraping approach fail — it fought display refresh rate and
-accumulated 2–3 ms of error per event.
+Polybot's screen-scraping approach fail.
 
 Because 1000 decisions a second is not an action space, an agent holds one action
-across a **control interval** — 50 ms by default, which is 4.2 m at 300 km/h,
-just under PolyTrack's 5 m part grid. The game works the same way: recordings
-store input *changes*, so a held key spans hundreds of ticks. Reward coefficients
-are denominated per second rather than per frame, so the same configuration means
-the same thing whichever backend is attached and retuning the interval does not
-silently rescale the reward.
+across a **control interval** — 50 ms by default, 4.2 m at 300 km/h. Reward
+coefficients are denominated per second rather than per frame, so the same
+configuration means the same thing whichever backend is attached.
 
-**`.tas` is the interchange format.** The environment, the search layer and the
-verifier all speak it. It round-trips into a ghost the real game can replay,
-which is the only trustworthy proof an agent's run is real.
+**A backend knows its own rate; nothing above it may assume one.** The stand-in's
+frames are sixtieths, so anything formatting one without dividing by
+`backend.rate` reports a time 16.67× too long. `SearchResult` carries a `rate`
+field because a bare frame count is not a time.
 
 **Observations are car-local.** World-frame coordinates would let the network
-memorise "at position (412, 88), turn left" — which collapses on unseen tracks.
-Local-frame features force it to learn geometry instead of location.
+memorise "at position (412, 88), turn left", which collapses on unseen tracks.
 
 **Speed-scaled lookahead.** GT Sophy samples the track ahead over roughly the
-next 6 seconds of travel, scaling sample distance by speed. Neinders traced
-TMRL's plateau at "safe but slow" directly to its lack of this.
+next 6 seconds of travel. Neinders traced TMRL's plateau at "safe but slow"
+directly to its lack of this.
 
-**Progress reward with a time penalty.** Dense progress along the reference line
-is what every successful racing agent converged on; sparse finish-time reward
-never trains because the agent never finishes by chance. The time penalty is what
-converts "drive safely" into "drive fast". Progress uses a high-water mark so an
-agent cannot oscillate over one stretch of track and farm reward forever.
+**Progress is tracked statefully, with a high-water mark.** Nearest-point
+projection is genuinely ambiguous wherever a track passes near itself. On the
+oval, a car 1 cm *behind* the start line projects onto the track's end and reads
+as a completed lap — beam search found this in seconds and returned a "winning
+run" of one frame of reverse. The high-water mark stops an agent oscillating over
+one stretch and farming reward forever.
 
-**Progress is tracked statefully.** Nearest-point projection is genuinely
-ambiguous wherever a track passes near itself, and PolyTrack tracks double back
-constantly. `ProgressTracker` windows the projection around the last known arc.
-Beam search found the alternative's failure in seconds and returned a "winning
-run" of one frame of reverse.
+**A reference line is a route, not a centerline.** A track code says where every
+piece of road is and nothing about the order they are driven in, so the route
+comes from a lap that was actually driven. Sampling that replay must not perturb
+it — runs of held input are cut at input boundaries, not on a fixed grid.
 
-**Projection is windowed.** Only segments near the car are considered. Without
-this, step cost grows with track length — a 2 km community track would run slower
-than a 200 m official one for no reason.
+**The size of a geometry error is no guide to the size of its consequences.**
+Part 159's collision mesh was wrong by 1.8e-4 — invisible, drivable at 308 km/h.
+It still threw a 400 km/h wall-ride clean off the track thirteen seconds later,
+and Winter 5 was the only one of four tracks it broke.
 
-### Throughput
+**This track punishes millisecond input-timing error.** Projecting the 19.025
+record onto a fixed block grid and replaying it reaches 26 m at 50 ms, 349 m at
+25 ms, 477 m at 10 ms and 468 m at 5 ms — of 1747. Zero timing error replays
+exactly. At a two-block spline knot spacing, 97.8% of the actions are identical
+and the car still reaches only 72 m against 477.
 
-The physics module costs **~650–800 µs per 1 ms tick**, nearly independent of
-track size, so it is the module's own fixed work rather than anything in this
-repo. That is roughly 1× realtime, which makes parallel collectors mandatory
-rather than an optimisation. Building a reference line for a 19-second run takes
-about 46 seconds of wall clock for exactly this reason.
+## Throughput, and a Windows trap worth knowing
 
-The stand-in backend runs orders of magnitude faster and its numbers say nothing
-about the real one.
+The physics module costs **~650–800 µs per 1 ms tick** on a quiet machine,
+roughly 1× realtime, nearly independent of track size — so it is the module's own
+fixed work, not anything in this repo. Parallel collectors are mandatory rather
+than an optimisation.
+
+**Windows confines a detached process to the efficiency cores at their lowest
+clock.** Anything launched in the background — `nohup`, a background shell, a
+scheduled task — is tagged with background quality of service ("EcoQoS"), and on
+a hybrid CPU that is not a small penalty: **52.6 s against 3.6 s** on a fixed
+single-threaded benchmark, and about 2.2× on the wasm workload. Every long-running
+entry point calls `lift_background_qos()` first.
+
+The symptom is deceptive and cost an afternoon. A tagged training run showed
+every python process pegging the four E-cores at 100% while the eight P-core
+threads sat at 2–24%, **total CPU 29%**, clocks boosting normally at 110% of
+base, no thermal cap, no paging. That reads as "the machine is three-quarters
+idle, so the learner must be blocked on a lock". It is not — the learner is
+running flat out on a core eight times too slow. The tell is that *everything*
+slows by the same factor at once, which a lock does not do. Measured here:
+achieved ratio **0.11 → 0.46**, **38 → 75** transitions/second, gradient step
+262 ms → roughly 30.
+
+## What this does not show
+
+Stated plainly, because the result above is easy to over-read:
+
+- **One track.** Winter 5 only. Until the generator lands this is a memorisation
+  problem, not a generalisation one.
+- **The policy alone is slower than the human.** 19.422 against 19.025. Every
+  gain came from search, and the search was steered by a human racing line.
+- **n = 1 everywhere.** No seeds, no repeats, no error bars. The three-arm
+  comparison varies several things at once and two of its arms share an author.
+- **No comparison to prior work.** Linesight, TMRL and GT Sophy are the
+  references the design derives from; nothing here is measured against them.
 
 ## Roadmap
 
-1. **Run the training loop for real.** It is built and tested; it has not been
-   trained. This is now the shortest path to an agent that drives.
-2. **Procedural track generator.** The editor plus exportable codes gives an
-   infinite training distribution. This is the piece that buys generalisation,
-   and Trackmania projects never had it cheaply.
-3. **Policy-guided search.** Feed the trained policy into `BeamSearch` as an
-   action prior so search only expands plausible actions. This is where record
-   times come from: Yosh's RL agent reached human-record level, but going past it
-   needed test-time search and exact-state exploitation.
+1. **Finish the procedural generator.** The encoder is done and the layout works;
+   the turn-placement bug is the blocker. This is what converts four tracks into
+   a distribution and retires the reference-line bootstrap.
+2. **Held-out evaluation.** Train on generated tracks, evaluate on unseen ones,
+   with the four official tracks as a transfer test.
+3. **Baselines with variance.** Several seeds, error bars, at least one standard
+   algorithm besides this IQN.
+4. **The other three tracks**, without `--forward-only` — they brake for 8–21% of
+   the lap and would be unfinishable with it.
 
 The largest available speed-up is sample efficiency rather than throughput.
 Episodes re-drive the first half of the track constantly; Linesight starts them
-from points spread along the reference line instead, which needs `save_state` to
-be cheaper than pickling a 24 MB heap.
+from points spread along the reference line instead, which needs `save_state` —
+and `save_state` turns out to be affordable, so this is mostly plumbing.
+
+## Reproducing this
+
+Two files the backend needs are **not in this repo**, because both derive from
+Kodub's game: `polytrack_physics.wasm` and `geometry.npz`. Extract them from a
+build you own and keep them local. The collision geometry is *captured, not
+reimplemented* — `tools/capture_geometry.py` serves your local client over
+127.0.0.1 and intercepts the `Init` message it sends its simulation worker, which
+carries every part's collision mesh. `tools/extract_geometry.mjs` reimplements
+the pipeline in real three.js and got 185 of 186 parts bit-identical; the one it
+missed cost more time than everything else in Stage 0 put together.
+
+`tracks.npz` is likewise gitignored — it embeds the game's track content.
+`records.json` is committed: it holds input toggles, frame counts and track
+content-hashes, nothing of the game's.
+
+Pin game version **0.6.2**. Replays, track codes and times are all
+version-sensitive, and the worker throws on a mismatch.
+
+The substrate every result above was produced against, frozen and checked by
+`scripts/verify_baselines.py`:
+
+| file | sha256 (first 16) |
+|---|---|
+| `polytrack_physics.wasm` | `d4ef02676973d41a` |
+| `geometry.npz` | `6fb32e3b719811dc` |
+| `tracks.npz` | `5cdc6a530cf527c7` |
+| `records.json` | `f87af733f13d7b0f` |
+
+**This is the open reproducibility problem.** A benchmark nobody else can run is
+not a benchmark, and the extraction path requires a copy of the game.
 
 ## A note on leaderboards
 
@@ -227,5 +480,6 @@ official leaderboards. The PolyTrack community draws the same line.
 Check Kodub's current Terms of Service before submitting anything — the game
 added a ToS in v0.6.0 and enforces server-side replay verification. Label runs
 clearly as TAS/AI and you will get help from the Discord rather than a ban.
-#   P o l y T r a c k  
- 
+
+`vps.kodub.com` returns 403 on every path for this client. That is an answer, not
+an obstacle to route around.
