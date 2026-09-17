@@ -18,16 +18,26 @@ route, in order, before a single frame is simulated.
 Every constant here was measured rather than guessed. ``PART_SIZE`` is 5 and a
 ``Straight`` is 20 world units long, so a piece spans exactly **four grid
 units** -- which is why every coordinate in a shipped track is a multiple of
-four. Orientation came from the game's own start transform: a part at rotation
-*r* points its local +z along ``_HEADINGS[r]``, and its local +x along
-``_HEADINGS[r + 1]``.
+four.
 
-``TurnSharp``'s collision box spans local x and z from -6.57 to +10, where a
-straight's spans z from -10 to +10. Its two open faces are therefore local +z
-and local +x, so a turn at rotation *r* joins the neighbours in directions
-``_HEADINGS[r]`` and ``_HEADINGS[r + 1]``. That is the whole connectivity model,
-and `tests/test_generator.py` checks it against the real backend rather than
-against this docstring.
+``TurnSharp``'s road surface is open on local +z and local +x and closed on
+local -z. Where those local axes point in the world is the part that went
+wrong the first time, and it is worth recording how.
+
+``start_transform`` composes the part rotation with a half turn about Y, and
+reading the axes off that transform says a part at rotation *r* points local +z
+along ``_HEADINGS[r]``. That is true of the **car**, which the half turn exists
+to face down the road -- and false of the part. The module places parts with the
+rotation alone, so a part's local +z actually lands on ``_HEADINGS[r + 2]`` and
+its local +x on ``_HEADINGS[r + 3]``. A turn at rotation *r* therefore joins
+``_HEADINGS[r + 2]`` and ``_HEADINGS[r + 3]``.
+
+Nothing straight could reveal this: a straight is symmetric under a half turn,
+so straight-only tracks drove to the finish under the wrong model. What settled
+it was one corner built at all four rotations and driven -- exactly the two the
+corrected model predicts got through, and the two the original model chose went
+nowhere. ``tests/test_generator.py`` drives generated tracks with corners on the
+real module so this cannot regress quietly.
 """
 
 from __future__ import annotations
@@ -40,9 +50,9 @@ import numpy as np
 from .physics.world import PART_SIZE
 from .trackcode import Environment, Part, TrackCode
 
-#: World direction a part at rotation r points its local +z along, read off the
-#: client's own start transform. A car spawned on a start at rotation r faces
-#: this way.
+#: The direction a car spawned on a start at rotation r faces, read off the
+#: client's own start transform. This is **not** where the part's own local +z
+#: points -- that is two entries further on; see the module docstring.
 _HEADINGS: tuple[tuple[int, int, int], ...] = (
     (0, 0, -1),
     (-1, 0, 0),
@@ -92,6 +102,7 @@ def generate(
     pieces: int = 60,
     checkpoints: int = 3,
     turn_chance: float = 0.35,
+    min_straight: int = 1,
     max_attempts: int = 200,
     environment: int = Environment.SUMMER,
     name: str | None = None,
@@ -104,6 +115,13 @@ def generate(
     tracks do pass close to themselves -- which is exactly the case
     ``ProgressTracker`` exists to handle, and a good thing to train against.
 
+    ``min_straight`` is the fewest straights allowed between two corners. At
+    zero the walk can place two right angles back to back, and when both turn
+    the same way that is a 180-degree hairpin inside two 20 m pieces with the
+    return leg in the adjacent lane -- a scripted driver at 11 m/s stopped dead
+    in exactly that on the one generated track out of ten it failed. One
+    straight spreads the same U-turn over three pieces.
+
     Raises:
         RuntimeError: if no walk of the requested length was found. The walk can
             trap itself in a dead end, so restarts are normal; a persistent
@@ -113,7 +131,7 @@ def generate(
 
     walk = None
     for _ in range(max_attempts):
-        walk = _walk(rng, pieces, turn_chance)
+        walk = _walk(rng, pieces, turn_chance, min_straight)
         if walk is not None:
             break
     if walk is None:
@@ -169,7 +187,7 @@ def generate(
     return GeneratedTrack(code=code, cells=tuple(cells))
 
 
-def _walk(rng: random.Random, pieces: int, turn_chance: float):
+def _walk(rng: random.Random, pieces: int, turn_chance: float, min_straight: int):
     """One self-avoiding walk. Returns ``(cells, rotations, is_turn)`` or None."""
     heading = _HEADINGS[rng.randrange(4)]
     cell = (0, 0, 0)
@@ -177,6 +195,7 @@ def _walk(rng: random.Random, pieces: int, turn_chance: float):
     rotations = [_rotation_for(heading)]
     is_turn = [False]
     used = {cell}
+    last_turn = -(10 ** 9)
 
     while len(cells) < pieces:
         options: list[tuple[tuple[int, int, int], int, bool]] = []
@@ -189,16 +208,20 @@ def _walk(rng: random.Random, pieces: int, turn_chance: float):
         # placed there becomes the turn. The first piece is the start, whose
         # geometry is a straight -- turning there would place start geometry
         # where the walk assumed a corner and break the road at piece one.
-        if len(cells) > 1:
+        here = len(cells) - 1
+        if here > 0 and here - last_turn - 1 >= min_straight:
             back = tuple(-component for component in heading)
             index = _HEADINGS.index(back)
-            # A turn at rotation r joins _HEADINGS[r] and _HEADINGS[r + 1]. The
-            # car enters through the face pointing back the way it came, so one
-            # of those two must be `back`; each way of satisfying that is one of
+            # A turn at rotation r joins _HEADINGS[r + 2] and _HEADINGS[r + 3]
+            # (see the module docstring for why it is not r and r + 1). The car
+            # enters through the face pointing back the way it came, so one of
+            # those two must be `back`; each way of satisfying that is one of
             # the two turns, left and right.
+            #   _HEADINGS[r + 2] == back  ->  r = index - 2, exit on r + 3
+            #   _HEADINGS[r + 3] == back  ->  r = index + 1, exit on r + 2
             for rotation, exit_heading in (
-                (index, _HEADINGS[(index + 1) % 4]),
-                ((index - 1) % 4, _HEADINGS[(index - 1) % 4]),
+                ((index - 2) % 4, _HEADINGS[(index + 1) % 4]),
+                ((index + 1) % 4, _HEADINGS[(index - 1) % 4]),
             ):
                 target = _advance(cell, exit_heading)
                 if target not in used:
@@ -217,6 +240,7 @@ def _walk(rng: random.Random, pieces: int, turn_chance: float):
         if turned:
             rotations[-1] = rotation
             is_turn[-1] = True
+            last_turn = here
             heading = tuple(
                 (target[i] - cell[i]) // STEP for i in range(3)
             )

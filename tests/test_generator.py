@@ -1,11 +1,14 @@
-"""Procedural layout: the invariants that hold, and an honest line round what does not.
+"""Procedural layout, checked against the real module rather than against itself.
 
-The generator is **not finished**. Straight-only tracks are laid out correctly
-and drive to the finish on the real module; tracks containing turns are laid out
-and encode fine, but the car does not get through the first corner. These tests
-pin the half that works so the half that does not cannot quietly break it.
+Generated tracks with corners drive to the finish under a scripted driver. That
+was not true for most of this module's life, and the two tests that would have
+caught it are the ones added last: a single corner built at every rotation, and
+whole generated tracks driven end to end. Straight-only tracks drove fine the
+whole time, because a straight is symmetric under the half turn the original
+model got wrong -- so every check that used only straights passed under a wrong
+model. Keep the corner tests.
 
-One earlier check is worth recording as a warning. An adjacency test that
+One earlier check is worth recording as a warning too. An adjacency test that
 measured, for each piece, the furthest any vertex reached along the connecting
 direction reported "0 broken connections" on a track the car could not drive.
 It was measuring extent, not openness -- a barrier reaches a boundary exactly as
@@ -154,14 +157,98 @@ def test_the_road_surface_is_open_where_the_walk_expects_it():
     assert turn[:, :, 2].min() > -9.5
 
 
-def test_a_straight_track_drives_to_the_finish():
-    """End to end on the real module: layout, codec, geometry, checkpoints.
+def test_corners_are_never_back_to_back():
+    """At least one straight between corners: no hairpin inside two pieces.
 
-    Straight-only, because that is what currently works. A track containing
-    turns is laid out and encodes correctly but the car does not get through the
-    first corner, and that gap is the generator's open bug rather than something
-    this test should assert.
+    Two same-handed right angles back to back reverse the car inside 40 m with
+    the return leg in the next lane. The scripted driver stopped dead in exactly
+    that on the one generated track out of ten it could not finish.
     """
+    for seed in range(40):
+        track = generate(seed, pieces=30)
+        order = {cell: index for index, cell in enumerate(track.cells)}
+        corners = sorted(
+            order[(p.x, p.y, p.z)] for p in track.code.parts if p.part_id == 1
+        )
+        assert all(b - a >= 2 for a, b in zip(corners, corners[1:])), (seed, corners)
+
+
+def _backend(code, assets):
+    from polytrack.physics.wasm import WasmPhysics, WasmUnavailable
+
+    try:
+        return WasmPhysics(code, assets=assets)
+    except WasmUnavailable as exc:
+        _SKIPPED.append(str(exc).splitlines()[0])
+        return None
+
+
+def test_a_corner_connects_only_at_the_rotation_the_model_predicts():
+    """The bug this module shipped with, pinned in miniature.
+
+    A car heading +x that must leave the corner toward +z needs the turn at
+    rotation 3. The original model, which read the part's axes off the car's
+    start transform and so carried a half turn it should not have, chose
+    rotation 1 -- and the car went nowhere.
+    """
+    assets = _assets()
+    if assets is None:
+        return
+    from polytrack.pursuit import PurePursuit
+    from polytrack.trackcode import Environment, Part, TrackCode
+
+    def corner(rotation):
+        parts = [Part(0, 0, 0, START, 3, 0, 0, None, 0)]
+        parts += [Part(4 * i, 0, 0, 0, 3, 0, 0, None, None) for i in (1, 2, 3)]
+        parts.append(Part(16, 0, 0, 1, rotation, 0, 0, None, None))
+        cells = [(4 * i, 0, 0) for i in range(5)]
+        for k in range(1, 6):
+            cell = (16, 0, 4 * k)
+            cells.append(cell)
+            piece = FINISH if k == 5 else 0
+            parts.append(Part(*cell, piece, 2, 0, 0, None, None))
+        code = TrackCode(
+            parts=tuple(parts), environment=Environment.SUMMER,
+            sun_direction=90, name=None, author=None, last_modified=None,
+            payload=b"",
+        )
+        return code, np.array(cells, dtype=np.float64) * PART_SIZE
+
+    reached = {}
+    for rotation in (3, 1):
+        code, route = corner(rotation)
+        backend = _backend(code, assets)
+        if backend is None:
+            return
+        result = PurePursuit(route).drive(backend, limit_ms=25_000)
+        reached[rotation] = (result.finished, result.reached)
+
+    assert reached[3][0], f"the predicted rotation should finish: {reached}"
+    assert not reached[1][0] and reached[1][1] <= 5, (
+        f"the old model's rotation should not get past the corner: {reached}"
+    )
+
+
+def test_generated_tracks_with_corners_drive_to_the_finish():
+    """End to end on the real module: walk, codec, geometry, checkpoints, driver."""
+    assets = _assets()
+    if assets is None:
+        return
+    from polytrack.pursuit import PurePursuit
+
+    for seed in (0, 4):
+        track = generate(seed, pieces=20, turn_chance=0.35, checkpoints=2)
+        assert any(p.part_id == 1 for p in track.code.parts), "no corners"
+        backend = _backend(track.code, assets)
+        if backend is None:
+            return
+        result = PurePursuit(track.route).drive(backend, limit_ms=60_000)
+        assert result.finished, (seed, result)
+        assert result.checkpoints == 2, (seed, result)
+
+
+def test_a_straight_track_drives_to_the_finish():
+    """The simplest end-to-end case, with no steering at all."""
     assets = _assets()
     if assets is None:
         return

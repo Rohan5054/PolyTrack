@@ -35,12 +35,13 @@ python tests/test_recording.py  # 14 tests
 python tests/test_reference.py  # 18 tests
 python tests/test_learning.py   # 20 tests
 python tests/test_spline.py     #  6 tests
-python tests/test_generator.py  #  9 tests
+python tests/test_generator.py  # 12 tests
+python tests/test_pursuit.py    #  7 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 137 pass. Four of the suites reach for files that are not in the repo and
+All 147 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -227,13 +228,17 @@ track codes and times are all version-sensitive.
 polytrack/
   actions.py      9 discrete actions; opposing inputs cancel (per v0.6.0)
   tas.py          .tas read/write; carries explicit run length
-  trackcode.py    PolyTrack2 code -> placed parts -> physics buffer
+  trackcode.py    PolyTrack2 code <-> placed parts -> physics buffer
   track.py        Track geometry, ProgressTracker, reference-line resampling
   observation.py  Sophy-style observation vector (62 floats)
-  env.py          Gymnasium env; progress reward + time penalty
+  env.py          Gymnasium env; progress reward, no negative terms
   reference.py    replay -> trajectory -> reference line -> environment
   library.py      tracks.npz: track code + reference line + par time, cached
   search.py       BeamSearch (+ optional policy prior), CEMSearch, RefinementSearch
+  spline.py       Arm 3: steering relaxation + separable CEM
+  generator.py    procedural tracks: self-avoiding grid walks, route by construction
+  pursuit.py      scripted pure-pursuit driver: drivability filter + baseline floor
+  priority.py     Windows efficiency-core opt-out
   learning/
     replay.py     sum-tree prioritised replay + n-step returns
     iqn.py        the quantile critic, its loss, and the agent
@@ -429,12 +434,16 @@ times; and the IQN training loop with parallel collectors.
    histogram. All `off_line` means the car cannot hold the track; all `stalled`
    means it cannot leave the line; a sudden flip between them at zero progress
    means the reward is being gamed again.
-2. **Procedural track generator** — the editor plus exportable codes gives an
-   infinite training distribution. This is what buys generalisation, and no
-   Trackmania project had it cheaply. It also retires the reference-line
-   bootstrap: a generated track knows its own route, so it needs no lap driven
-   for it. Until it exists, **four tracks is a memorisation problem, not a
-   generalisation one.**
+2. ~~**Procedural track generator**~~ — done. `polytrack/generator.py` lays out
+   self-avoiding grid walks and returns the route by construction, which
+   retires the reference-line bootstrap. 24 of 24 generated tracks with corners
+   are drivable by `polytrack/pursuit.py`. **The part orientation is not the
+   one `start_transform` implies**: that transform carries a half turn for the
+   car, and parts are placed without it, so a `TurnSharp` at rotation r joins
+   `_HEADINGS[r+2]` and `_HEADINGS[r+3]`. Straights are symmetric under a half
+   turn and cannot reveal this; test corners. Next: a generated-track library,
+   par times from the scripted driver, and training on it without
+   `--forward-only`.
 3. ~~**Policy-guided search**~~ — done. `BeamSearch(prior=..., top_k=...)` and
    `scripts/search_run.py`. See below.
 

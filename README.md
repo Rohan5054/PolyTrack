@@ -42,9 +42,10 @@ That is one track. See [What this does not show](#what-this-does-not-show).
 | IQN training loop | Done — **860,000 gradient steps run** |
 | Windows efficiency-core mitigation | Done — `polytrack/priority.py` |
 | Three-arm comparison protocol | Done — `EXPERIMENT.md`, `arms/` |
-| **Procedural track generator** | **In progress — layout works, drivability bug open** |
+| **Procedural track generator** | **Done — 24/24 generated tracks with corners drivable** |
+| Scripted pure-pursuit driver | Done — drivability filter and baseline floor |
 
-**137 tests passing.** Four suites reach for files not in the repo and are
+**147 tests passing.** Four suites reach for files not in the repo and are
 stronger when they find them; without them they skip and say so.
 
 ## Quick start
@@ -59,7 +60,8 @@ python tests/test_recording.py  # 14
 python tests/test_reference.py  # 18  (needs the game files)
 python tests/test_learning.py   # 20  (needs torch)
 python tests/test_spline.py     #  6
-python tests/test_generator.py  #  9
+python tests/test_generator.py  # 12  (4 need the game files)
+python tests/test_pursuit.py    #  7
 python scripts/smoke_test.py
 python scripts/verify_baselines.py   # re-verify every banked lap + substrate
 ```
@@ -273,37 +275,81 @@ found **459 ms in one run**. Four further searches afterwards returned +0 ms, an
 a fifth — against a reference line rebuilt from the 18.786 lap itself — returned
 a file byte-identical to its seed. Search against this policy has converged.
 
-## Procedural track generator — in progress
+## Procedural track generator
 
-The roadmap item that matters most, and the one that would make this
-generalisation rather than memorisation. Two thirds exist:
+The roadmap item that matters most, and the one that turns this from
+memorisation into a generalisation problem. It works.
 
-- **`trackcode.encode`** — done and validated three ways. Every shipped track
-  that decodes at all (31 of 31) re-encodes to the same parts, environment and
-  sun direction; the client's own worker loads a Winter 5 rebuilt from parsed
-  parts and all three banked laps still verify frame-exactly on it; five unit
-  tests cover the edges.
-- **`polytrack/generator.py`** — lays out self-avoiding grid walks with starts,
-  straights, sharp turns, checkpoints and a finish, and returns the route by
-  construction. Every constant was measured, not guessed: `PART_SIZE` is 5 and a
-  `Straight` is 20 world units, so a piece spans exactly four grid units, which
-  is why every coordinate in a shipped track is a multiple of four.
-- **What does not work yet.** A straight-only generated track drives and
-  finishes. A track with turns does not: the car reaches the first corner and
-  bounces. The road-surface footprint confirms `TurnSharp` opens on local +z and
-  +x exactly as modelled, so something in the placement is still wrong. An
-  earlier adjacency check that appeared to pass was measuring vertex extent
-  rather than openness and proved nothing.
+```python
+from polytrack.generator import generate
+track = generate(seed=7, pieces=30)      # a TrackCode, plus its route
+track.route                              # world-space points, in driving order
+```
 
-`tests/test_generator.py` pins the half that works, including a straight-only
-track driven end to end on the real module. It deliberately does not assert the
-turn failure — that is the open bug, not a property to lock in.
+**24 of 24 generated tracks with corners are drivable** on the real module. A
+scripted pure-pursuit driver finished 23 of them at its default 11 m/s corner
+speed, in 36–47 s, passing all three checkpoints every time; the 24th finished
+at 9 m/s. Each track had 4–8 right-angle corners over 30 pieces.
 
-One earlier check is worth recording as a warning: an adjacency test measuring
-how far each piece's vertices reached along the connecting direction reported
-"0 broken connections" on a track the car could not drive. It was measuring
-extent, not openness — a barrier reaches a boundary exactly as well as an
-opening does — so it confirmed nothing while looking like proof.
+Three pieces make that possible:
+
+- **`trackcode.encode`** — validated three ways. Every shipped track that
+  decodes at all (31 of 31) re-encodes to the same parts, environment and sun
+  direction; the client's own worker loads a Winter 5 rebuilt from parsed parts
+  and all three banked laps still verify frame-exactly on it; unit tests cover
+  the edges.
+- **`polytrack/generator.py`** — self-avoiding grid walks with a start,
+  straights, sharp corners, checkpoints and a finish, returning the route by
+  construction. That is what **retires the reference-line bootstrap**: a
+  generated track needs no lap driven on it before it can be trained on.
+- **`polytrack/pursuit.py`** — the scripted driver. It is the drivability
+  filter for generated tracks and the floor any learned policy has to beat.
+
+Every constant was measured, not guessed. `PART_SIZE` is 5 and a `Straight` is
+20 world units, so a piece spans exactly four grid units — which is why every
+coordinate in a shipped track is a multiple of four.
+
+### Three bugs, and why the obvious checks missed all of them
+
+**The part orientation was off by a half turn.** The axes were read off
+`start_transform`, which composes the part rotation with a half turn about Y.
+That half turn exists to face the *car* down the road; the module places the
+*part* with the rotation alone. So a turn at rotation *r* joins `H[r+2]` and
+`H[r+3]`, not `H[r]` and `H[r+1]`. A straight is symmetric under a half turn,
+so **straight-only tracks drove to the finish under the wrong model** — every
+check that used only straights passed. What settled it was one corner built at
+all four rotations and driven: exactly the two rotations the corrected model
+predicts got through, and the two the original model chose went nowhere.
+
+**Every controller before `pursuit.py` steered backwards.** Measured facing +x,
+`THROTTLE_RIGHT` turns the car toward +z, which reads as a *negative* cross
+product. Earlier scripts had the sign the other way round, so they crashed into
+corners for two reasons at once.
+
+**An adjacency check "passed" on a track the car could not drive.** It measured
+how far each piece's vertices reached along the connecting direction and
+reported zero broken connections. It was measuring extent, not openness — a
+barrier reaches a boundary exactly as well as an opening does. Its replacement
+keeps only upward-facing triangles and asks where road actually is.
+
+### Two layout rules the driver taught
+
+**At least one straight between corners** (`min_straight=1`). Two same-handed
+right angles back to back make a 180° hairpin inside 40 m with the return leg in
+the adjacent lane; the driver stopped dead in one. One straight spreads the same
+U-turn over three pieces. `min_straight=0` is still available for S-bends.
+
+**Retry slower before rejecting a track.** The one track the default driver
+failed was a three-piece U-turn it took too fast. At 9 m/s it finished. A
+drivability filter run at one speed would have thrown away a good track.
+
+### What the driver is not
+
+A crawl. It aims at the next point, steers bang-bang, and brakes when a corner
+is near. Its times say what a track allows at walking pace, not what it allows.
+It is also **real-module only**: the stand-in lies in the x–y plane while
+PolyTrack is y-up, so on the stand-in the driver never steers — and still
+"finishes" the demo chicane, because the stand-in is lenient.
 
 ## Architecture
 
@@ -319,7 +365,8 @@ polytrack/
   library.py      tracks.npz: track code + reference line + par time, cached
   search.py       BeamSearch (+ policy prior), CEMSearch, RefinementSearch
   spline.py       Arm 3: steering relaxation + separable CEM
-  generator.py    procedural layout (in progress, uncommitted)
+  generator.py    procedural tracks: self-avoiding grid walks, route by construction
+  pursuit.py      scripted pure-pursuit driver: drivability filter + baseline floor
   priority.py     Windows efficiency-core opt-out
   learning/
     replay.py     sum-tree prioritised replay + n-step returns
@@ -414,8 +461,12 @@ achieved ratio **0.11 → 0.46**, **38 → 75** transitions/second, gradient ste
 
 Stated plainly, because the result above is easy to over-read:
 
-- **One track.** Winter 5 only. Until the generator lands this is a memorisation
-  problem, not a generalisation one.
+- **One track.** Every agent result is Winter 5. The generator now produces
+  drivable tracks, but **no policy has been trained on them yet**, so there is
+  still no generalisation result — only the means to get one.
+- **The generator's tracks are drivable, not demanding.** 24/24 were finished by
+  a crawling scripted driver, which says the geometry is sound. It says nothing
+  about whether they are interesting to race.
 - **The policy alone is slower than the human.** 19.422 against 19.025. Every
   gain came from search, and the search was steered by a human racing line.
 - **n = 1 everywhere.** No seeds, no repeats, no error bars. The three-arm
@@ -427,32 +478,21 @@ Stated plainly, because the result above is easy to over-read:
 
 Ordered by what unblocks what, not by appeal.
 
-### 1. Finish the procedural generator — the blocker for everything else
+### 1. A generated-track library, and training on it
 
-Until it lands, four tracks is a memorisation problem and no generalisation
-claim is available. Two thirds are done: the encoder is validated against the
-game's own loader, and layouts are correct, self-avoiding and drivable when
-they contain no turns.
+The generator works; nothing trains on it yet. Three pieces:
 
-**The open bug.** A track containing a `TurnSharp` lays out and encodes
-correctly, but the car reaches the first corner and bounces. What is known:
+- **A library builder** that writes generated tracks into the same shape as
+  `tracks.npz`, with the route as the reference line and the drivability filter
+  applied — retrying at a slower corner speed before rejecting.
+- **A par time per track.** The finish bonus scales by `par / elapsed`, and a
+  generated track has no human lap to take par from. The scripted driver's time
+  is a natural, measured starting point.
+- **Training without `--forward-only`.** Generated corners need braking.
 
-- The start spawns on the first cell facing the second exactly (alignment
-  1.000), so `_HEADINGS` is right.
-- A straight-only track drives to the finish, so starts, straights,
-  checkpoints and finishes are all placed correctly.
-- The road-surface footprint confirms `TurnSharp` opens on local +z and +x and
-  is closed on local −z, which is the connectivity model the walk assumes.
-- The car stops ~1.7 units past the cell boundary it should be entering
-  through, losing wheel contact — consistent with striking a step rather than
-  falling into a void.
-
-What to try next, cheapest first: compare a generated turn against a turn in a
-shipped track at the same rotation, cell-for-cell, since the official tracks are
-known-good layouts; check whether the turn's road surface sits at a different
-height than the straight's at the shared boundary; and consider `TurnShort` or
-`TurnLong` instead, which spread the corner over more than one cell and may be
-what official tracks actually use for connected 90° turns.
+Worth widening the distribution once the first run works: `TurnShort` and
+`TurnLong`, S-bends via `min_straight=0`, and height changes. Each is a new
+geometry question, and this section records how the last one went.
 
 ### 2. Held-out evaluation
 
@@ -480,7 +520,9 @@ be affordable, so this is mostly plumbing.
 
 ## Known loose ends
 
-- **`generator.py` turn placement** — the blocker above.
+- **The generator's vocabulary is narrow** — flat, one corner type, no S-bends
+  by default. Enough for a first generalisation run, not for a style that
+  resembles the shipped tracks.
 - **Reward coefficients in `RewardConfig` are placeholders.** There is finally a
   real backend to tune them against and nobody has.
 - **`ObservationBuilder._cast_rays` approximates the corridor** from the
