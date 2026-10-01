@@ -45,7 +45,7 @@ That is one track. See [What this does not show](#what-this-does-not-show).
 | **Procedural track generator** | **Done — 24/24 generated tracks with corners drivable** |
 | Scripted pure-pursuit driver | Done — drivability filter and baseline floor |
 
-**147 tests passing.** Four suites reach for files not in the repo and are
+**152 tests passing.** Four suites reach for files not in the repo and are
 stronger when they find them; without them they skip and say so.
 
 ## Quick start
@@ -62,6 +62,7 @@ python tests/test_learning.py   # 20  (needs torch)
 python tests/test_spline.py     #  6
 python tests/test_generator.py  # 12  (4 need the game files)
 python tests/test_pursuit.py    #  7
+python tests/test_corridor.py   #  5  (needs the game files)
 python scripts/smoke_test.py
 python scripts/verify_baselines.py   # re-verify every banked lap + substrate
 ```
@@ -275,6 +276,43 @@ found **459 ms in one run**. Four further searches afterwards returned +0 ms, an
 a fifth — against a reference line rebuilt from the 18.786 lap itself — returned
 a file byte-identical to its seed. Search against this policy has converged.
 
+## Where the car can be
+
+The last approximation in the world model, now closed. The observation's rays
+used to measure how far a probe was from the **reference line**, calling
+anything past `Track.width` a wall — so where the driven lap hugged one side it
+reported a wall on open road, and on a generated track, whose reference line is
+its own centreline, it was close to meaningless.
+
+`polytrack/corridor.py` builds a `RoadMap` from the real collision geometry: a
+grid over the track where each cell carries a **vertical occupancy bitmask**,
+one bit per height bin. A ray marches cells until the solid runs out. Building
+Winter 5 takes 1.9 s and 1.8 MB; casting 9 rays × 50 probes takes **109 µs**,
+against a 50 ms control interval.
+
+### Three wrong models, and the test that caught them
+
+The validation is that **a real human lap must be on ground for its whole
+length** — which passes only if the part rotation, the rasterisation and the
+height query are all correct together. Three plausible designs failed it:
+
+| model | a real lap read as off-ground |
+|---|---|
+| keep the N highest surfaces per cell | **33%** — scenery above the road evicts the road |
+| count only upward-facing surfaces | **14%** — the car wall-rides |
+| symmetric height band | **15%** — the car jumps |
+
+The second is the interesting one. **The car drives on walls**: Winter 5's
+record wall-rides at 400 km/h along `WallTrackBottom` pieces whose supporting
+faces are vertical. "Drivable surface" is not "upward-facing surface", so the
+map records every collision triangle at any orientation and asks only whether
+there is solid geometry near the car's height. The band is asymmetric — far
+below, barely above — because below is somewhere to land and above is a ceiling.
+
+A map that called everything solid would also score 100%, so the necessary
+other half is that it discriminates: on the lap 100%, at 10 m to the side 59%,
+at 80 m 0.5%.
+
 ## Procedural track generator
 
 The roadmap item that matters most, and the one that turns this from
@@ -367,6 +405,7 @@ polytrack/
   spline.py       Arm 3: steering relaxation + separable CEM
   generator.py    procedural tracks: self-avoiding grid walks, route by construction
   pursuit.py      scripted pure-pursuit driver: drivability filter + baseline floor
+  corridor.py     RoadMap: where the car can be, from the real collision geometry
   priority.py     Windows efficiency-core opt-out
   learning/
     replay.py     sum-tree prioritised replay + n-step returns
@@ -525,10 +564,6 @@ be affordable, so this is mostly plumbing.
   resembles the shipped tracks.
 - **Reward coefficients in `RewardConfig` are placeholders.** There is finally a
   real backend to tune them against and nobody has.
-- **`ObservationBuilder._cast_rays` approximates the corridor** from the
-  reference line and `Track.width`. With the real backend that measures distance
-  from *the driven lap*, not from a wall — the module has the collision geometry
-  and this should ask it. Isolated in one method for exactly that reason.
 - **47 legacy pre-`PolyTrack2` community tracks still do not decode**, which
   shrinks the corpus a generator could learn a style from.
 - **`WasmPhysics.save_state` pickles the whole 24 MB heap.** Affordable (13.9 ms)

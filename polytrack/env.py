@@ -30,7 +30,7 @@ things depending on which one is attached.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import gymnasium as gym
 import numpy as np
@@ -42,6 +42,10 @@ from .physics.base import PhysicsBackend, ticks_for
 from .physics.reference import ReferencePhysics
 from .tas import TAS, format_time
 from .track import ProgressTracker, Track, straight_track
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .corridor import RoadMap
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +133,10 @@ class PolyTrackEnv(gym.Env):
         backend: PhysicsBackend | None = None,
         obs_config: ObservationConfig | None = None,
         reward_config: RewardConfig | None = None,
+        # Real collision geometry for the observation's rays. Without one they
+        # fall back to measuring distance from the reference line, which is a
+        # different and much weaker question -- see ObservationBuilder.
+        road: "RoadMap | None" = None,
         # 50 ms is 4.2 m at 300 km/h, slightly under PolyTrack's 5 m part grid:
         # roughly one decision per piece of track at top speed. Linesight uses
         # 100 ms in Trackmania, but PolyTrack's grid is tighter and its corners
@@ -156,7 +164,7 @@ class PolyTrackEnv(gym.Env):
         super().__init__()
         self.track = track or straight_track()
         self.backend = backend or ReferencePhysics(self.track)
-        self.observer = ObservationBuilder(self.track, obs_config)
+        self.observer = ObservationBuilder(self.track, obs_config, road=road)
         self.reward_config = reward_config or RewardConfig()
         self.control_interval_ms = float(control_interval_ms)
         self.time_limit_ms = float(time_limit_ms)

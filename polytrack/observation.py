@@ -19,12 +19,18 @@ instead of location.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from dataclasses import dataclass
 
 import numpy as np
 
 from .physics.base import CarState
 from .track import Track
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .corridor import RoadMap
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,9 +63,18 @@ class ObservationConfig:
 class ObservationBuilder:
     """Turns a :class:`CarState` into a flat float32 vector for the network."""
 
-    def __init__(self, track: Track, config: ObservationConfig | None = None) -> None:
+    def __init__(
+        self,
+        track: Track,
+        config: ObservationConfig | None = None,
+        road: "RoadMap | None" = None,
+    ) -> None:
         self.track = track
         self.config = config or ObservationConfig()
+        #: Real collision geometry to cast against. Without one the rays fall
+        #: back to the reference-line approximation, which is what the stand-in
+        #: and the synthetic demo tracks have to use -- they have no geometry.
+        self.road = road
         # Sample fractions are fixed; only the total distance varies with speed.
         # Squaring biases samples toward the near field, where precision matters
         # most, while still reaching far enough to see the corner after next.
@@ -151,21 +166,35 @@ class ObservationBuilder:
         relative = points - state.position[None, :]
         return relative @ basis.T
 
-    def _cast_rays(self, state: CarState, arc: float) -> np.ndarray:
-        """Approximate corridor width probes, normalised to [0, 1].
-
-        A true implementation raycasts against track collision geometry. Until
-        the WASM backend exposes that, this approximates the corridor using the
-        centerline and track width -- adequate for validating the pipeline, and
-        deliberately isolated here so swapping in real rays touches one method.
-        """
-        cfg = self.config
+    def _ray_directions(self, state: CarState) -> np.ndarray:
+        """(R, 3) unit directions fanned around the car's heading."""
         right = np.cross(state.forward, state.up)
-        # (R, 3) ray directions fanned out around the car's heading.
-        directions = (
+        return (
             np.cos(self._ray_angles)[:, None] * state.forward[None, :]
             - np.sin(self._ray_angles)[:, None] * right[None, :]
         )
+
+    def _cast_rays(self, state: CarState, arc: float) -> np.ndarray:
+        """Distance to the edge of the drivable surface, normalised to [0, 1].
+
+        With a :class:`~polytrack.corridor.RoadMap` this asks the real collision
+        geometry where the solid ends. Without one it falls back to the
+        reference-line approximation below, which answers a different question
+        -- how far until a probe is more than ``Track.width`` from *the lap
+        somebody drove* -- and gets it wrong wherever that lap did not run down
+        the middle. On a procedurally generated track, whose reference line is
+        its own centreline, the fallback is close to meaningless.
+        """
+        cfg = self.config
+        directions = self._ray_directions(state)
+        if self.road is not None:
+            hits = self.road.cast(
+                state.position, directions,
+                max_distance=cfg.ray_max_distance,
+                step=cfg.ray_max_distance / self._n_probes,
+            )
+            return hits / cfg.ray_max_distance
+
         # (R, P, 3) probe points, then flattened to one batched projection.
         # Marching each ray in its own Python loop was the single biggest cost
         # in the whole step function; batching it is worth the reshaping.

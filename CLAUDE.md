@@ -37,11 +37,12 @@ python tests/test_learning.py   # 20 tests
 python tests/test_spline.py     #  6 tests
 python tests/test_generator.py  # 12 tests
 python tests/test_pursuit.py    #  7 tests
+python tests/test_corridor.py   #  5 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 147 pass. Four of the suites reach for files that are not in the repo and
+All 152 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -238,6 +239,7 @@ polytrack/
   spline.py       Arm 3: steering relaxation + separable CEM
   generator.py    procedural tracks: self-avoiding grid walks, route by construction
   pursuit.py      scripted pure-pursuit driver: drivability filter + baseline floor
+  corridor.py     RoadMap: where the car can be, from the real collision geometry
   priority.py     Windows efficiency-core opt-out
   learning/
     replay.py     sum-tree prioritised replay + n-step returns
@@ -395,6 +397,23 @@ minute. It took the smoke run from 0 completed episodes in 90 s to 17. The cut
 needs a grace period or it kills the bootstrap: a car on the line has not moved
 yet, and a policy cut at 3 m every episode never collects the
 throttle-then-move transitions that teach it the throttle.
+
+**The car drives on walls, so "drivable surface" is not "upward-facing
+surface".** Winter 5's human record wall-rides at 400 km/h along
+`WallTrackBottom` pieces whose supporting faces are vertical. `corridor.RoadMap`
+therefore records **every** collision triangle at any orientation and asks only
+whether there is solid geometry near the car's height; filtering to normals
+within 45 degrees of up is the obvious reading and it reported that real lap as
+off-ground for 14% of its length. Two other models failed the same test before
+it: keeping the N highest surfaces per cell (the scenery above the road evicts
+the road, 33% off-ground) and a symmetric height band (a car that jumps reads as
+airborne, 15%). The band is asymmetric -- far below the car, barely above it --
+because below is somewhere to land and above is a ceiling.
+
+`test_a_real_human_lap_is_on_ground_for_its_whole_length` is what caught all
+three, and it passes only if the part rotation, the rasterisation and the height
+query are simultaneously right. A map that called everything solid would pass it
+too, so `test_the_map_distinguishes_road_from_void` is its other half.
 
 **A reference line is a route, not a centerline.** A track code says where every
 piece of road is and nothing about the order they are driven in, so
@@ -586,10 +605,6 @@ synthetic chicane; it demonstrates the algorithms, not the track.
   `format_time` on stand-in frames, which now reads 16.67× short.
 - Reward coefficients in `RewardConfig` are placeholders. There is finally a
   real backend to tune them against; nobody has.
-- `ObservationBuilder._cast_rays` still approximates the corridor from the
-  reference line and `Track.width`. With the real backend that measures distance
-  from *the driven lap*, not from a wall — the module has the collision geometry
-  and this should ask it. Isolated in one method for exactly this reason.
 - `WasmPhysics.save_state` pickles the entire heap, 24 MB a call. This was
   recorded here as "far too slow for beam search" and that was never measured:
   it is **13.9 ms**, against 14.4 s to replay a lap. Narrowing it would cut

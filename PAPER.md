@@ -199,7 +199,39 @@ later, and it broke exactly one of the four tracks we had oracles for.
 no amount of inspection substitutes for an exact replay test. We consider this
 the strongest single argument for the methodology in §3.1–3.3.
 
-### 3.5 Cost
+### 3.5 What the agent is allowed to perceive
+
+An environment can be faithful in its dynamics and still lie in its
+observations. Ours did. The observation includes rangefinder-style probes, after
+Fuchs et al., and these originally measured distance from the *reference line*,
+treating anything beyond a nominal track width as a wall. That answers a
+different question from the one it appears to: where a driven lap hugged one
+side of the road it reports a wall on open tarmac, and on a procedurally
+generated track, whose reference line is its own centreline, it is close to
+uninformative.
+
+We now rasterise the collision geometry into a grid in which each cell holds a
+vertical occupancy bitmask, and march rays through it. Validation is that a real
+human lap must be on ground for its entire length — a test that passes only if
+the part transform, the rasterisation and the height query are simultaneously
+correct, and which rejected three plausible designs:
+
+| model | fraction of a real lap reported off-ground |
+|---|---|
+| keep the N highest surfaces per cell | 33 % |
+| count only upward-facing surfaces | 14 % |
+| symmetric height tolerance | 15 % |
+
+The second is worth stating as a finding about the game rather than a bug in our
+code: **the car drives on walls.** The human record wall-rides at 400 km/h along
+pieces whose supporting faces are vertical, so "drivable surface" cannot be
+defined as "upward-facing surface". A benchmark that filtered on surface normals
+— the obvious choice — would have silently misreported a seventh of that lap.
+
+Cost is 1.9 s to build a track and 109 µs for nine rays, against a 50 ms control
+interval.
+
+### 3.6 Cost
 
 The module costs **650–800 µs per 1 ms tick** on an unloaded machine, nearly
 independent of track size, so it is the module's own fixed work. That is roughly

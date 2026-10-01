@@ -43,7 +43,7 @@ from .physics.assets import GeometryAssets
 from .physics.wasm import WasmPhysics
 from .recording import Recording
 from .track import Track
-from .trackcode import TrackCode
+from .trackcode import TrackCode, decode
 
 
 class ReferenceLineError(RuntimeError):
@@ -249,4 +249,12 @@ def env_from_recording(
         assets=assets, sample_ms=sample_ms, spacing=spacing,
         smoothing=smoothing, width=width,
     )
-    return PolyTrackEnv(track=line, backend=backend, **env_kwargs)
+    from .corridor import RoadMap
+
+    # Rays want the real collision geometry. `assets` being None means the
+    # caller has none, and the observation falls back to the reference line.
+    road = env_kwargs.pop("road", None)
+    if road is None and assets is not None:
+        code = decode(track) if isinstance(track, str) else track
+        road = RoadMap.build(code, assets)
+    return PolyTrackEnv(track=line, backend=backend, road=road, **env_kwargs)

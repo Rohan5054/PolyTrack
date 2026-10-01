@@ -128,6 +128,7 @@ def collector_process(
         # assume, and the cost of being wrong is an order of magnitude.
         lift_background_qos()
 
+        from ..corridor import RoadMap
         from ..library import TrackLibrary
         from ..physics.assets import GeometryAssets
         from ..physics.wasm import WasmPhysics
@@ -152,12 +153,18 @@ def collector_process(
         def env_for(entry) -> PolyTrackEnv:
             existing = envs.get(entry.name)
             if existing is None:
+                code = entry.track_code()
                 backend = WasmPhysics(
-                    entry.track_code(), assets=assets, wasm_path=config.wasm_path
+                    code, assets=assets, wasm_path=config.wasm_path
                 )
+                # A couple of seconds per track, once, against an observation
+                # that otherwise measures distance from a driven lap instead of
+                # from an edge.
+                road = RoadMap.build(code, assets)
                 existing = PolyTrackEnv(
                     track=entry.line,
                     backend=backend,
+                    road=road,
                     obs_config=config.obs_config,
                     reward_config=config.reward_config,
                     control_interval_ms=config.control_interval_ms,
