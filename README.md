@@ -542,6 +542,10 @@ be affordable, so this is mostly plumbing.
 
 ## If this is going to be published
 
+A draft lives in **[`PAPER.md`](PAPER.md)**. Sections backed by measurements in
+this repo are written; sections describing experiments that have not been run
+are marked as gaps and contain no results.
+
 The honest framing is **not** "we beat a human on Winter 5". It is *faithful
 environment construction from a shipped game binary, validated to
 frame-exactness, with a procedural track distribution* — where agent results
