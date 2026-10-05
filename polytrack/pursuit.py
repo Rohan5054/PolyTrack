@@ -146,8 +146,17 @@ class PurePursuit:
         *,
         limit_ms: int = 120_000,
         interval_ms: int = 50,
+        stall_seconds: float = 6.0,
     ) -> PursuitResult:
-        """Drive from a fresh reset until the finish or ``limit_ms``."""
+        """Drive from a fresh reset until the finish, a stall, or ``limit_ms``.
+
+        The stall cut is not a nicety. A wedged car makes no progress and still
+        costs the whole limit, and the limit has to be generous enough for a slow
+        lap -- so without the cut, a track the driver cannot drive costs more
+        than three that it can. Building a library tries each track at several
+        corner speeds, which multiplies that cost by the number of retries: it
+        took 3.5 minutes a track instead of 40 seconds.
+        """
         self.reset()
         state = backend.reset()
         result = None
@@ -155,11 +164,19 @@ class PurePursuit:
         # not, so convert through the backend's own rate.
         ticks = max(1, round(interval_ms * backend.rate / 1000.0))
         limit = round(limit_ms * backend.rate / 1000.0)
+        stall_ticks = round(stall_seconds * backend.rate)
+        furthest, since_progress = self.target, 0
         while backend.frame < limit:
             result = backend.step_many(ACTION_TO_MASK[int(self.act(state))], ticks)
             state = result.state
             if result.finished:
                 break
+            if self.target > furthest:
+                furthest, since_progress = self.target, 0
+            else:
+                since_progress += ticks
+                if since_progress >= stall_ticks:
+                    break
         return PursuitResult(
             finished=bool(result is not None and result.finished),
             frames=int(state.frame),

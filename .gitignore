@@ -8,3 +8,9 @@ geometry.npz
 node_modules/
 tracks.npz
 tracks_18786.npz
+
+# Generated-track libraries. Our own content, not the game's -- but derived
+# artifacts, rebuildable from a seed with scripts/build_generated_library.py,
+# and only usable with geometry.npz, which is not in the repo either.
+tracks_generated.npz
+tracks_heldout.npz

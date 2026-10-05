@@ -104,6 +104,26 @@ def test_the_time_limit_is_milliseconds_whatever_the_backend_rate():
     assert 120 <= result.frames <= 123, result.frames
 
 
+def test_a_driver_that_gets_nowhere_is_cut_long_before_the_limit():
+    """A wedged car must not cost the whole time limit.
+
+    The limit has to be generous enough for a slow lap, so without this a track
+    the driver cannot drive costs more than three it can -- and a library build
+    tries every track at several corner speeds, multiplying that.
+    """
+    track = straight_track(length=2000.0)
+    backend = ReferencePhysics(track)
+    # A route the car cannot approach: the stand-in drives in x-y, so nothing
+    # it does ever brings it closer to points strung out along z.
+    unreachable = np.array([[0.0, 0.0, 50.0 * i] for i in range(1, 6)])
+    result = PurePursuit(unreachable).drive(
+        backend, limit_ms=120_000, stall_seconds=4.0
+    )
+    assert not result.finished
+    # Four seconds of stall at 60 Hz, plus the interval it noticed on.
+    assert result.frames < 0.25 * 120_000 * backend.rate / 1000.0, result.frames
+
+
 def test_throttle_right_turns_toward_plus_z_on_the_real_module():
     """Re-measure the convention the controller is built on."""
     from polytrack.physics.assets import GeometryAssets, GeometryUnavailable
