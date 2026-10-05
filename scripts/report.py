@@ -147,6 +147,7 @@ def _exploit_check(history: list[dict]) -> None:
 
 def evaluate(run: Path, library_path: Path, only=None) -> None:
     """Drive every track with the checkpoint, greedily. The real answer."""
+    from polytrack.corridor import RoadMap
     from polytrack.env import PolyTrackEnv
     from polytrack.learning.iqn import IQNAgent
     from polytrack.library import TrackLibrary
@@ -172,9 +173,14 @@ def evaluate(run: Path, library_path: Path, only=None) -> None:
           "(no exploration)\n")
     print("      track            lap      time     par    outcome")
     for entry in library:
-        backend = WasmPhysics(entry.track_code(), assets=assets)
+        code = entry.track_code()
+        backend = WasmPhysics(code, assets=assets)
+        # Built with the road map, because the policy trained with one. Without
+        # it the rays fall back to the reference-line approximation and the
+        # network is handed a different observation from the one it learned on.
         env = PolyTrackEnv(
             track=entry.line, backend=backend,
+            road=RoadMap.build(code, assets),
             time_limit_ms=entry.par_frames * 3, par_frames=entry.par_frames,
         )
         observation, _ = env.reset()
