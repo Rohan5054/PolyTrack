@@ -31,11 +31,22 @@ the best known lap, exactly as the official tracks do it.
 **Width.** 6.57 m, the half-width of a `Straight`'s road surface, rather than
 the 5.0 the official library defaults to. With the real backend this is only an
 observation scale -- the module decides what is off-track and never consults it.
+
+## Vary the tracks, or the distribution is not one
+
+Length and corner density are sampled per track rather than fixed. A first
+build held both constant and produced 48 tracks of 572-576 m, every one with
+four checkpoints and a scripted-driver time within half a second of every
+other. A policy can learn *that* without learning to drive, and a
+generalisation result measured on it would not mean much -- held-out tracks
+drawn from a one-point distribution are the training tracks with different
+corners.
 """
 
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 import time
 from pathlib import Path
@@ -50,9 +61,11 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=32,
                         help="tracks to accept before stopping")
-    parser.add_argument("--pieces", type=int, default=30)
+    parser.add_argument("--pieces", default="20,60",
+                        help="piece count, or a 'low,high' range sampled per track")
     parser.add_argument("--checkpoints", type=int, default=3)
-    parser.add_argument("--turn-chance", type=float, default=0.3)
+    parser.add_argument("--turn-chance", default="0.2,0.5",
+                        help="turn probability, or a 'low,high' range")
     parser.add_argument("--first-seed", type=int, default=0)
     parser.add_argument("--max-seeds", type=int, default=0,
                         help="give up after this many seeds (0 = count * 3)")
@@ -89,6 +102,12 @@ def main(argv=None) -> int:
         print(f"  {exc}")
         return 2
 
+    def _range(text, cast):
+        parts = [cast(v) for v in str(text).split(",")]
+        return (parts[0], parts[-1])
+
+    pieces_range = _range(args.pieces, int)
+    turn_range = _range(args.turn_chance, float)
     speeds = [float(s) for s in args.corner_speeds.split(",")]
     max_seeds = args.max_seeds or args.count * 3
     entries: list[TrackEntry] = []
@@ -101,9 +120,14 @@ def main(argv=None) -> int:
     for seed in range(args.first_seed, args.first_seed + max_seeds):
         if len(entries) >= args.count:
             break
+        # Sampled from the seed itself, so a library is reproducible from its
+        # seed range alone.
+        choose = random.Random(seed * 2_654_435_761)
+        pieces = choose.randint(*pieces_range)
+        turn_chance = choose.uniform(*turn_range)
         track = generate(
-            seed, pieces=args.pieces, checkpoints=args.checkpoints,
-            turn_chance=args.turn_chance,
+            seed, pieces=pieces, checkpoints=args.checkpoints,
+            turn_chance=turn_chance,
         )
 
         order = {cell: index for index, cell in enumerate(track.cells)}
@@ -163,6 +187,11 @@ def main(argv=None) -> int:
 
     lengths = [e.line.length for e in entries]
     pars = [e.par_frames / 1000.0 for e in entries]
+    corners = [
+        sum(1 for part in e.track_code().parts if part.part_id == 1)
+        for e in entries
+    ]
+    print(f"  corners {min(corners)}-{max(corners)} per track")
     print(f"\n  accepted {len(entries)}, rejected {rejected}, in {minutes:.0f} min")
     print(f"  length {min(lengths):.0f}-{max(lengths):.0f} m, "
           f"par {min(pars):.1f}-{max(pars):.1f} s")
