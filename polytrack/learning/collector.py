@@ -64,6 +64,11 @@ class CollectorConfig:
     #: Weights are pulled at most this often, to keep a worker from spending its
     #: time deserialising instead of driving.
     weight_poll_seconds: float = 2.0
+    #: Offsets every worker's RNG so repeat runs differ in a controlled way.
+    #: Without it each run reuses the same per-worker seeds and "three seeds"
+    #: means three runs that differ only by thread timing -- which is variance
+    #: of a sort, but not the sort an error bar is supposed to describe.
+    seed: int = 0
     obs_config: ObservationConfig = field(default_factory=ObservationConfig)
     reward_config: RewardConfig = field(default_factory=RewardConfig)
     iqn_config: IQNConfig = field(default_factory=IQNConfig)
@@ -135,8 +140,8 @@ def collector_process(
         from ..recording import Recording
         from .replay import NStepAccumulator
 
-        np.random.seed(1000 + index)
-        torch.manual_seed(1000 + index)
+        np.random.seed(1000 + index + 7919 * config.seed)
+        torch.manual_seed(1000 + index + 7919 * config.seed)
 
         assets = GeometryAssets.load(config.geometry_path)
         library = TrackLibrary.load(config.library_path)

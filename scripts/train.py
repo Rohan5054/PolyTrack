@@ -110,6 +110,11 @@ def parse_args(argv=None):
     parser.add_argument("--log-every", type=float, default=20.0)
     parser.add_argument("--learner-threads", type=int, default=2)
     parser.add_argument(
+        "--seed", type=int, default=0,
+        help="run seed. Offsets the learner's init and every collector's RNG, "
+             "so repeats differ in a controlled, reproducible way",
+    )
+    parser.add_argument(
         "--smoke", action="store_true",
         help="two workers, 90 seconds, tiny buffer -- proves the loop runs",
     )
@@ -135,6 +140,10 @@ def main(argv=None) -> int:
     # at 14.7x on a fixed single-threaded benchmark.
     lift_background_qos()
     torch.set_num_threads(args.learner_threads)
+    # Seeds the network's initialisation and the learner's sampling. The
+    # collectors get it through CollectorConfig below.
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     if not args.library.exists():
         print(f"no {args.library}. Build it first:")
@@ -190,6 +199,7 @@ def main(argv=None) -> int:
               "Winter 5. Pass --track to train one, or --all-actions.\n")
 
     collector_config = CollectorConfig(
+        seed=args.seed,
         library_path=str(args.library.resolve()),
         track_names=tuple(args.track or ()),
         control_interval_ms=args.control_interval_ms,
