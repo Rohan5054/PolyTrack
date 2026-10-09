@@ -6,6 +6,12 @@ last tenths.**
 
 ## Where this stands
 
+**A policy trained on 48 generated tracks finishes 94% of attempts on 16 it has
+never seen**, with no measurable generalisation gap against the tracks it
+trained on (92%), beating a scripted baseline on all 16. It finishes none of
+the four human-designed official tracks — see
+[Generalisation](#generalisation-the-result-this-was-built-for).
+
 **Winter 5, 18.786 s** — 239 ms faster than the human personal best this project
 was measured against (19.025), and 636 ms faster than the same policy driving
 without search (19.422). It reproduces its finish frame exactly on a fresh
@@ -43,6 +49,7 @@ That is one track. See [What this does not show](#what-this-does-not-show).
 | Windows efficiency-core mitigation | Done — `polytrack/priority.py` |
 | Three-arm comparison protocol | Done — `EXPERIMENT.md`, `arms/` |
 | **Procedural track generator** | **Done — 24/24 generated tracks with corners drivable** |
+| **Generalisation to unseen tracks** | **Done — 94% finish rate on 16 held-out tracks** |
 | Scripted pure-pursuit driver | Done — drivability filter and baseline floor |
 
 **152 tests passing.** Four suites reach for files not in the repo and are
@@ -276,6 +283,34 @@ found **459 ms in one run**. Four further searches afterwards returned +0 ms, an
 a fifth — against a reference line rebuilt from the 18.786 lap itself — returned
 a file byte-identical to its seed. Search against this policy has converged.
 
+## Generalisation: the result this was built for
+
+A single IQN policy, 1,220,000 gradient steps over 28.5 hours on 48 generated
+tracks, full nine-action space, evaluated with five greedy attempts per track.
+Artifacts in [`arms/generalisation/`](arms/generalisation/).
+
+| | tracks | finished ≥ once | mean finish rate | median best/par | beat the driver |
+|---|---|---|---|---|---|
+| **held-out** (unseen seeds) | 16 | 16/16 | **94%** | 1.35 | **16/16** |
+| training (16 of 48) | 16 | 16/16 | 92% | 1.36 | 16/16 |
+| zero-shot, official tracks | 4 | **0/4** | **0%** | — | — |
+
+**No measurable generalisation gap** — 94% against 92%, 1.35 against 1.36 on
+time. The held-out figure being marginally higher is noise; what it rules out
+is memorising 48 layouts. The policy is **1.55× faster than the scripted
+driver** on held-out tracks (median, range 1.37–1.73).
+
+Most of the learning is early — 82% finish rate by 257k steps, roughly flat
+after, with the greedy policy completing every track around 735k–987k. The last
+million gradient steps bought very little.
+
+**The zero-shot row is the honest limit.** The generator uses five of the game's
+186 part types on flat ground: no jumps, banking, elevation or walls. The
+official tracks have all of those, and one of them is won by wall-riding at
+400 km/h. That row measures the distance between the generated distribution and
+human-designed levels, not a failure to generalise within a distribution — which
+did not happen. Closing it is a generator problem, not a learning one.
+
 ## Where the car can be
 
 The last approximation in the world model, now closed. The observation's rays
@@ -500,12 +535,14 @@ achieved ratio **0.11 → 0.46**, **38 → 75** transitions/second, gradient ste
 
 Stated plainly, because the result above is easy to over-read:
 
-- **One track.** Every agent result is Winter 5. The generator now produces
-  drivable tracks, but **no policy has been trained on them yet**, so there is
-  still no generalisation result — only the means to get one.
-- **The generator's tracks are drivable, not demanding.** 24/24 were finished by
-  a crawling scripted driver, which says the geometry is sound. It says nothing
-  about whether they are interesting to race.
+- **One training seed.** The generalisation result is a single run. No repeats,
+  no error bars on anything here.
+- **No learned baseline.** The scripted driver is a floor, not a competitor.
+  Nothing is measured against Linesight, TMRL, GT Sophy or a standard algorithm.
+- **Par is a convention**, not a standard — on generated tracks it is the
+  scripted driver's time halved, so `best/par` means nothing outside this repo.
+- **The generated distribution is narrow**, and the 0/4 zero-shot row is the
+  measurement of what that costs.
 - **The policy alone is slower than the human.** 19.422 against 19.025. Every
   gain came from search, and the search was steered by a human racing line.
 - **n = 1 everywhere.** No seeds, no repeats, no error bars. The three-arm

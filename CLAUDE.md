@@ -445,9 +445,13 @@ Done since: the track code decoder; the environment on real physics
 (`reference.env_from_recording`); reward coefficients rescaled to laps and par
 times; and the IQN training loop with parallel collectors.
 
-1. **Actually train something.** One 17-minute run has happened; it found the
-   reward exploit above and was stopped. The reward has been rebuilt since and
-   **nothing has trained against the new one.** Watch three things: `ratio`
+1. ~~**Actually train something**~~ — done, twice. Winter 5 forward-only to
+   801k steps, and **48 generated tracks to 1.22M steps over 28.5 h, which
+   generalises**: 94% finish rate on 16 unseen tracks against 92% on training
+   tracks, beating the scripted driver on all 16, and 0/4 on the official
+   tracks because the generator uses five of 186 part types on flat ground.
+   See `arms/generalisation/`. Most learning is early -- 82% by 257k steps,
+   roughly flat after, so budget the first 300k and treat the rest as polish. Watch three things: `ratio`
    (achieved gradient steps per transition — under ~0.3 and the learner is
    wasting most of what the collectors produce), `lap`, and the `failures`
    histogram. All `off_line` means the car cannot hold the track; all `stalled`

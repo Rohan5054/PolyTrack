@@ -344,9 +344,45 @@ failure is always one steering input away.
 
 ---
 
-## 6. Results on one track
+## 6. Results
 
-> **STATUS: WRITTEN. Single track, n = 1, no baselines. Read §7 alongside.**
+> **STATUS: WRITTEN. One training seed throughout. Read §7 alongside.**
+
+### 6.1 Generalisation to unseen tracks
+
+A single IQN policy was trained for 1,220,000 gradient steps (28.5 hours, six
+collectors) on 48 procedurally generated tracks, with the full nine-action
+space. It was evaluated with five greedy attempts per track — greedy is not
+deterministic, since IQN samples fresh quantile fractions each forward pass —
+on 16 tracks generated from disjoint seeds, and for comparison on 16 of the
+training tracks.
+
+| | tracks | finished ≥ once | mean finish rate | median best/par | beat the driver |
+|---|---|---|---|---|---|
+| **held-out** | 16 | 16/16 | **94 %** | 1.35 | **16/16** |
+| training | 16 | 16/16 | 92 % | 1.36 | 16/16 |
+| zero-shot, official | 4 | **0/4** | **0 %** | — | — |
+
+**There is no measurable generalisation gap.** 94 % against 92 %, and 1.35
+against 1.36 on time. The held-out figure being marginally higher is noise; what
+it rules out is memorisation of 48 layouts. Against the scripted baseline the
+policy is **1.55× faster** on held-out tracks (median, range 1.37–1.73).
+
+Most of the learning is early: 82 % finish rate by 257,000 steps and roughly
+flat thereafter, with the greedy policy completing every track in the windows
+around 735,000–987,000 steps. The final million gradient steps bought very
+little.
+
+**The zero-shot row is the honest limitation.** The generator uses five of the
+game's 186 part types — a start, a straight, one right-angle corner, a
+checkpoint, a finish — on flat ground, with no jumps, banking, elevation or
+walls. The official tracks have all of those; the human record on one of them
+wall-rides at 400 km/h along vertical faces. So this row measures the distance
+between our generated distribution and human-designed levels, which is large,
+and not a failure to generalise within a distribution, which did not occur.
+Closing it is a generator problem rather than a learning one.
+
+### 6.2 Search on a single official track
 
 All figures are gate-verified and confirmed by the client's own verifier.
 
@@ -405,14 +441,19 @@ constrains what any trajectory parameterisation can represent.
 
 > **STATUS: WRITTEN. Keep this section in any submitted version.**
 
-- **No generalisation result.** Every agent figure is one track. The generator
-  now produces drivable tracks but **no policy has been trained on them**.
-- **n = 1 throughout.** No seeds, no repeats, no error bars, no variance
-  estimates. The three approaches in §6 differ along several axes at once and
-  are not a controlled comparison; two of them share an author, and the third
+- **One training seed.** The generalisation result in §6.1 is a single run.
+  No repeats, so no error bars on any figure in this paper.
+- **No learned baseline.** The scripted driver is a floor, not a competitor.
+  Nothing here is measured against Linesight, TMRL, GT Sophy or any standard
+  RL algorithm on a common task.
+- **Par is a convention, not a standard.** On generated tracks it is the
+  scripted driver's time halved, so `best/par` compares runs inside this paper
+  and means nothing outside it.
+- **The generated distribution is narrow.** Five part types on flat ground, and
+  §6.1's zero-shot row measures what that costs.
+- **The three approaches on the official track** differ along several axes at
+  once and are not a controlled comparison; two share an author, and the third
   was informed by the second's findings.
-- **No baselines.** Nothing here is measured against Linesight, TMRL, GT Sophy
-  or any standard algorithm on a common task.
 - **The policy does not beat a human.** It is 397 ms slower than the reference
   lap; only policy-plus-search is faster.
 - **The environment is validated on four tracks.** Eight runs is a strong gate
@@ -424,19 +465,13 @@ constrains what any trajectory parameterisation can represent.
 
 > **STATUS: GAP. Nothing below has been run. No results exist for these.**
 
-### 8.1 Generalisation (required for the central claim)
+### 8.1 Widen the generated distribution
 
-Train on a procedurally generated track distribution; evaluate on **held-out
-generated tracks** never seen in training, and on the four official tracks as a
-zero-shot transfer set. Report finish rate and lap time relative to the scripted
-driver's time on the same track.
-
-Prerequisites, none of which exist yet: a track library built from generator
-output with the drivability filter applied; a par time per generated track (the
-finish bonus is scaled by par over elapsed, and a generated track has no human
-lap to take par from — the scripted driver's time is the natural measured
-substitute); and training without the forward-only restriction, since generated
-corners require braking.
+Done for the core claim; see §6.1. What remains is the zero-shot gap. The
+generator uses five of 186 part types on flat ground, and the official tracks
+need jumps, banking, elevation and wall-rides. Each addition is a fresh
+geometry problem of the kind §4.1 describes, and the zero-shot row is the
+measurement that says whether it worked.
 
 ### 8.2 Seeds and variance
 
