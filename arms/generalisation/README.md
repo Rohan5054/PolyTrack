@@ -24,8 +24,22 @@ held-out tracks (median; range 1.37-1.73) and beat it on every single one.
 
 ## What the zero-shot row means, and does not
 
-0 of 4 official tracks is a real failure and belongs in any write-up, but it is
-**out-of-distribution transfer, not a held-out test**. The generator uses five
+0 of 4 official tracks is a real failure and belongs in any write-up. It is
+also not a near miss -- the policy does not run out of time, it stops working
+almost immediately:
+
+| track | length | best reached | % of lap | outcome |
+|---|---|---|---|---|
+| Winter 5 | 1747 m | 54 m | **3.1 %** | stalled |
+| Desert 3 | 1581 m | 46 m | **2.9 %** | stalled |
+| Summer 1 | 1301 m | 306 m | **23.5 %** | stalled |
+| Summer 5 | 3980 m | 59 m | **1.5 %** | stalled |
+
+Three of the four end around 50 m, two or three pieces in. That matters for
+how the row is read: a policy finishing 90% of a lap would suggest a
+distribution close enough to polish, and this is not that.
+
+It is **out-of-distribution transfer, not a held-out test**. The generator uses five
 part types out of the game's 186: a start, a straight, one right-angle corner,
 a checkpoint and a finish. It builds flat tracks with no jumps, no banking, no
 walls to ride and no elevation. Winter 5's human record wall-rides at 400 km/h

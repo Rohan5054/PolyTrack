@@ -85,6 +85,7 @@ def main(argv=None) -> int:
     print(f"  actions: {'all 9' if restriction is None else restriction}\n")
     print(f"    {'track':<16}{'finished':>10}{'best':>10}{'par':>9}"
           f"{'best/par':>10}{'driver':>10}")
+    print(f"    {'':16}{'':>10}{'(% reached if never finished)':>10}\n")
 
     finished_any = 0
     finish_rates: list[float] = []
@@ -96,6 +97,7 @@ def main(argv=None) -> int:
         code = entry.track_code()
         road = RoadMap.build(code, assets)
         times: list[int] = []
+        furthest = 0.0
         for _ in range(args.attempts):
             env = PolyTrackEnv(
                 track=entry.line,
@@ -112,6 +114,7 @@ def main(argv=None) -> int:
                 )
                 if terminated or truncated:
                     break
+            furthest = max(furthest, float(info.get("arc", 0.0)))
             if info.get("finished"):
                 times.append(int(env.elapsed_frames))
 
@@ -139,7 +142,11 @@ def main(argv=None) -> int:
                   f"{entry.par_frames / 1000:>8.2f}s{ratio:>10.2f}"
                   f"{driver_text:>10}")
         else:
-            print(f"    {entry.name:<16}{rate:>9.0%}{'--':>10}"
+            # Never report a bare 0% -- "did not finish" and "stalled after
+            # 50 m of 1747" are different results, and the first reads as the
+            # second being unknown.
+            reached = furthest / max(entry.line.length, 1e-9)
+            print(f"    {entry.name:<16}{rate:>9.0%}{'(' + format(reached, '.0%') + ')':>10}"
                   f"{entry.par_frames / 1000:>8.2f}s{'--':>10}{driver_text:>10}")
 
     print(f"\n  tracks finished at least once : {finished_any}/{len(entries)}"

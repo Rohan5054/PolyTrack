@@ -304,7 +304,9 @@ Most of the learning is early — 82% finish rate by 257k steps, roughly flat
 after, with the greedy policy completing every track around 735k–987k. The last
 million gradient steps bought very little.
 
-**The zero-shot row is the honest limit.** The generator uses five of the game's
+**The zero-shot row is the honest limit, and it is not a near miss** — the
+policy reaches 3.1%, 2.9%, 23.5% and 1.5% of the four official tracks before
+stalling, three of them inside 60 m. The generator uses five of the game's
 186 part types on flat ground: no jumps, banking, elevation or walls. The
 official tracks have all of those, and one of them is won by wall-riding at
 400 km/h. That row measures the distance between the generated distribution and

@@ -373,8 +373,13 @@ flat thereafter, with the greedy policy completing every track in the windows
 around 735,000–987,000 steps. The final million gradient steps bought very
 little.
 
-**The zero-shot row is the honest limitation.** The generator uses five of the
-game's 186 part types — a start, a straight, one right-angle corner, a
+**The zero-shot row is the honest limitation**, and it is not a near miss. The
+policy reaches 3.1 %, 2.9 %, 23.5 % and 1.5 % of the four official tracks
+before stalling — three of them inside 60 m, two or three track pieces from the
+line. A policy completing most of a lap would imply a distribution close enough
+to close by polishing; this does not.
+
+The generator uses five of the game's 186 part types — a start, a straight, one right-angle corner, a
 checkpoint, a finish — on flat ground, with no jumps, banking, elevation or
 walls. The official tracks have all of those; the human record on one of them
 wall-rides at 400 km/h along vertical faces. So this row measures the distance
