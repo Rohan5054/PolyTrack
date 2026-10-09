@@ -309,8 +309,41 @@ class CollectorPool:
                 return out
 
     def close(self, timeout: float = 10.0) -> None:
+        """Stop the workers and let the process actually exit.
+
+        The second half is not tidiness. Every ``put`` onto a multiprocessing
+        queue starts a feeder thread in the *writing* process, and Python joins
+        those threads at interpreter exit. The learner writes weights to each
+        worker's queue, so if a worker dies holding unread data the feeder
+        blocks on a full pipe and the join never returns: training prints its
+        summary, saves its checkpoint, and then hangs forever having finished
+        all its work.
+
+        That is not hypothetical. It cost a seeded run three hours -- the first
+        of three sequential runs completed, saved, and sat deadlocked at zero
+        CPU until it was killed by hand, with the other two never starting.
+        ``cancel_join_thread`` is the documented way out: it says the data in
+        that queue is expendable, which at this point it is.
+        """
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+
         self.stop.set()
         for process in self._processes:
+            # A process that was never started cannot be joined -- it raises.
+            # train.py closes the pool in a finally block, so a failure during
+            # startup would come back as "can only join a started process" and
+            # bury whatever actually went wrong.
+            if process.pid is None:
+                continue
             process.join(timeout=timeout)
             if process.is_alive():
                 process.terminate()
+
+        for channel in (*self._weight_queues, self.transitions, self.stats):
+            try:
+                channel.cancel_join_thread()
+                channel.close()
+            except Exception:  # pragma: no cover - already closed or broken
+                pass

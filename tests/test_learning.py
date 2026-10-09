@@ -468,6 +468,29 @@ def test_lifting_background_qos_never_raises_and_reports_honestly():
         assert applied, "the API has been present since Windows 10 1709"
 
 
+def test_closing_the_pool_lets_the_process_exit():
+    """A finished run must actually exit, not deadlock having done its work.
+
+    Every put onto a multiprocessing queue starts a feeder thread in the
+    writing process, and Python joins those at interpreter exit. The learner
+    writes weights to each worker, so a worker that dies holding unread data
+    leaves the parent blocked on a full pipe forever. One seeded run printed
+    its summary, saved its checkpoint and then sat at zero CPU until killed,
+    which stopped the two runs queued behind it.
+
+    Checked without starting any worker: closing a pool that never ran must
+    still cancel the feeder threads, and must be safe to call twice, because
+    train.py closes in a finally block that can run after an earlier close.
+    """
+    from polytrack.learning.collector import CollectorConfig, CollectorPool
+
+    pool = CollectorPool(2, CollectorConfig())
+    pool.broadcast({"nothing": 1})
+    pool.close(timeout=0.1)
+    assert pool.stop.is_set()
+    pool.close(timeout=0.1)
+
+
 if __name__ == "__main__":
     import sys
     import traceback
