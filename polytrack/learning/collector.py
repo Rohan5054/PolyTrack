@@ -34,6 +34,7 @@ import multiprocessing as mp
 import queue
 import time
 import traceback
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -64,6 +65,12 @@ class CollectorConfig:
     #: Weights are pulled at most this often, to keep a worker from spending its
     #: time deserialising instead of driving.
     weight_poll_seconds: float = 2.0
+    #: Environments kept per worker. Each one owns a ~24 MB wasm heap, so this
+    #: is the knob that stops memory scaling with library size: unbounded, 48
+    #: generated tracks cost 1.1 GB a worker and 6.7 GB across six. Round-robin
+    #: scheduling means a small cache misses most episodes, which is fine -- a
+    #: rebuild is a second or two against a twenty-second episode.
+    env_cache_size: int = 4
     #: Offsets every worker's RNG so repeat runs differ in a controlled way.
     #: Without it each run reuses the same per-worker seeds and "three seeds"
     #: means three runs that differ only by thread timing -- which is variance
@@ -112,6 +119,59 @@ def worker_epsilon(index: int, n_workers: int, config: CollectorConfig) -> float
     return float(config.epsilon_base**exponent)
 
 
+
+class EnvCache:
+    """Least-recently-used environments, bounded.
+
+    Creating an environment registers 186 collision meshes and builds a road
+    map -- cheap but not free -- so caching matters. Caching *without a bound*
+    is what turned a track library into a memory leak: every environment owns a
+    `WasmPhysics` with its own ~24 MB heap, so one per track costs 24 MB x
+    tracks, per worker. On 48 generated tracks that measured 1.1 GB a worker
+    and 6.7 GB across six, taking a 15.7 GB machine to 0.2 GB free and 2000
+    pages a second. It never showed on the single-track runs, where the same
+    code caches exactly one thing.
+
+    Collectors round-robin their tracks, so a cache smaller than the library
+    misses nearly every episode and this is really "rebuild per episode, with a
+    little slack". That is the right trade here: a rebuild costs a second or
+    two against a twenty-second episode, and in exchange memory stops depending
+    on how big the library is.
+
+    Sharding tracks across workers instead would avoid the rebuilds entirely,
+    but then each track is only ever driven at one worker's epsilon, which
+    changes the exploration distribution rather than just its cost.
+    """
+
+    __slots__ = ("_build", "_limit", "_entries", "builds")
+
+    def __init__(self, build, limit: int) -> None:
+        self._build = build
+        self._limit = max(int(limit), 1)
+        self._entries: OrderedDict = OrderedDict()
+        #: How many times an environment had to be constructed. A collector
+        #: that rebuilds every episode is working as designed; one that
+        #: rebuilds many times per episode is not.
+        self.builds = 0
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def get(self, entry):
+        key = entry.name
+        existing = self._entries.get(key)
+        if existing is not None:
+            self._entries.move_to_end(key)
+            return existing
+
+        built = self._build(entry)
+        self.builds += 1
+        self._entries[key] = built
+        while len(self._entries) > self._limit:
+            self._entries.popitem(last=False)
+        return built
+
+
 def collector_process(
     index: int,
     n_workers: int,
@@ -150,34 +210,27 @@ def collector_process(
         agent = IQNAgent(config.iqn_config)
         epsilon = worker_epsilon(index, n_workers, config)
 
-        # Built lazily and kept: creating one registers 186 collision meshes,
-        # which is cheap (~0.16 s) but not free, and reset() is the right way to
-        # start a new episode anyway.
-        envs: dict[str, PolyTrackEnv] = {}
+        def build_env(entry) -> PolyTrackEnv:
+            code = entry.track_code()
+            backend = WasmPhysics(
+                code, assets=assets, wasm_path=config.wasm_path
+            )
+            # Real collision geometry for the observation's rays, rather than
+            # distance from a driven lap.
+            road = RoadMap.build(code, assets)
+            return PolyTrackEnv(
+                track=entry.line,
+                backend=backend,
+                road=road,
+                obs_config=config.obs_config,
+                reward_config=config.reward_config,
+                control_interval_ms=config.control_interval_ms,
+                time_limit_ms=entry.par_frames * config.time_limit_factor,
+                par_frames=entry.par_frames,
+            )
 
-        def env_for(entry) -> PolyTrackEnv:
-            existing = envs.get(entry.name)
-            if existing is None:
-                code = entry.track_code()
-                backend = WasmPhysics(
-                    code, assets=assets, wasm_path=config.wasm_path
-                )
-                # A couple of seconds per track, once, against an observation
-                # that otherwise measures distance from a driven lap instead of
-                # from an edge.
-                road = RoadMap.build(code, assets)
-                existing = PolyTrackEnv(
-                    track=entry.line,
-                    backend=backend,
-                    road=road,
-                    obs_config=config.obs_config,
-                    reward_config=config.reward_config,
-                    control_interval_ms=config.control_interval_ms,
-                    time_limit_ms=entry.par_frames * config.time_limit_factor,
-                    par_frames=entry.par_frames,
-                )
-                envs[entry.name] = existing
-            return existing
+        cache = EnvCache(build_env, config.env_cache_size)
+        env_for = cache.get
 
         accumulator = NStepAccumulator(config.n_step, config.gamma)
         last_poll = 0.0

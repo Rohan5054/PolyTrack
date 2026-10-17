@@ -491,6 +491,57 @@ def test_closing_the_pool_lets_the_process_exit():
     pool.close(timeout=0.1)
 
 
+def test_the_environment_cache_does_not_grow_with_the_library():
+    """Memory per worker must not scale with how many tracks there are.
+
+    Every environment owns a WasmPhysics with its own ~24 MB heap, and the
+    cache that held one per track was unbounded. On 48 generated tracks that
+    measured 1.1 GB a worker and 6.7 GB across six, which took a 15.7 GB
+    machine to 0.2 GB free and 2000 pages a second. It never showed on the
+    single-track runs, where the same code caches exactly one thing -- so the
+    guard has to be against library size, not against absolute bytes.
+    """
+    from types import SimpleNamespace
+
+    from polytrack.learning.collector import EnvCache
+
+    cache = EnvCache(lambda entry: object(), limit=4)
+    tracks = [SimpleNamespace(name=f"Generated {i}") for i in range(48)]
+    for _ in range(3):           # round-robin, as a collector does
+        for entry in tracks:
+            cache.get(entry)
+    assert len(cache) == 4, len(cache)
+
+    # A repeated track is served from the cache rather than rebuilt.
+    before = cache.builds
+    for _ in range(10):
+        cache.get(tracks[-1])
+    assert cache.builds == before, "a cached track should not be rebuilt"
+
+    # And the bound is never zero, however it is configured.
+    tiny = EnvCache(lambda entry: object(), limit=0)
+    tiny.get(tracks[0])
+    assert len(tiny) == 1
+
+
+def test_the_cache_evicts_least_recently_used():
+    from types import SimpleNamespace
+
+    from polytrack.learning.collector import EnvCache
+
+    cache = EnvCache(lambda entry: entry.name, limit=2)
+    a, b, c = (SimpleNamespace(name=n) for n in "abc")
+    cache.get(a)
+    cache.get(b)
+    cache.get(a)        # a is now the most recent, b the least
+    cache.get(c)        # so b is the one evicted
+    builds = cache.builds
+    cache.get(a)
+    assert cache.builds == builds, "a was most recently used and should survive"
+    cache.get(b)
+    assert cache.builds == builds + 1, "b was least recently used and should go"
+
+
 if __name__ == "__main__":
     import sys
     import traceback
