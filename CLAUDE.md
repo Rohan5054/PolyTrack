@@ -447,11 +447,16 @@ times; and the IQN training loop with parallel collectors.
 
 1. ~~**Actually train something**~~ — done, twice. Winter 5 forward-only to
    801k steps, and **48 generated tracks to 1.22M steps over 28.5 h, which
-   generalises**: 94% finish rate on 16 unseen tracks against 92% on training
-   tracks, beating the scripted driver on all 16, and 0/4 on the official
-   tracks because the generator uses five of 186 part types on flat ground.
-   See `arms/generalisation/`. Most learning is early -- 82% by 257k steps,
-   roughly flat after, so budget the first 300k and treat the rest as polish. Watch three things: `ratio`
+   generalises**. Three independently seeded 300k-step runs each finish every
+   one of 16 unseen tracks, at **97.9% +/- 0.6%** of attempts; the 1.22M-step
+   run gets 94% held-out against 92% on its training tracks, so there is no
+   measurable generalisation gap. All beat the scripted driver on all 16, and
+   all get 0/4 on the official tracks, reaching 1.5-23.5% of those laps before
+   stalling -- the generator uses five of 186 part types on flat ground, so
+   that is distribution distance, not a learning failure. See
+   `arms/generalisation/`. **Four times the compute did not buy reliability**
+   (94% against 97.9%) -- it bought pace (1.35x par against 1.43x). Budget
+   300k steps unless lap time is what you want. Watch three things: `ratio`
    (achieved gradient steps per transition — under ~0.3 and the learner is
    wasting most of what the collectors produce), `lap`, and the `failures`
    histogram. All `off_line` means the car cannot hold the track; all `stalled`

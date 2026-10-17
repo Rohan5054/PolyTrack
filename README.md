@@ -6,9 +6,10 @@ last tenths.**
 
 ## Where this stands
 
-**A policy trained on 48 generated tracks finishes 94% of attempts on 16 it has
-never seen**, with no measurable generalisation gap against the tracks it
-trained on (92%), beating a scripted baseline on all 16. It finishes none of
+**Three independently seeded policies trained on 48 generated tracks each
+finish every one of 16 tracks they have never seen, at 97.9% ± 0.6% of
+attempts**, with no measurable generalisation gap against the tracks they
+trained on, beating a scripted baseline on all 16. It finishes none of
 the four human-designed official tracks — see
 [Generalisation](#generalisation-the-result-this-was-built-for).
 
@@ -49,7 +50,7 @@ That is one track. See [What this does not show](#what-this-does-not-show).
 | Windows efficiency-core mitigation | Done — `polytrack/priority.py` |
 | Three-arm comparison protocol | Done — `EXPERIMENT.md`, `arms/` |
 | **Procedural track generator** | **Done — 24/24 generated tracks with corners drivable** |
-| **Generalisation to unseen tracks** | **Done — 94% finish rate on 16 held-out tracks** |
+| **Generalisation to unseen tracks** | **Done — 97.9% ± 0.6% over three seeds, 16 held-out tracks** |
 | Scripted pure-pursuit driver | Done — drivability filter and baseline floor |
 
 **152 tests passing.** Four suites reach for files not in the repo and are
@@ -289,11 +290,29 @@ A single IQN policy, 1,220,000 gradient steps over 28.5 hours on 48 generated
 tracks, full nine-action space, evaluated with five greedy attempts per track.
 Artifacts in [`arms/generalisation/`](arms/generalisation/).
 
+**Three seeds, 300k steps each, 240 held-out episodes:**
+
+| seed | finished ≥ once | mean finish rate | median best/par |
+|---|---|---|---|
+| 1 | 16/16 | 99% | 1.39 |
+| 2 | 16/16 | 98% | 1.46 |
+| 3 | 16/16 | 98% | 1.44 |
+| **across seeds** | **100% ± 0%** | **97.9% ± 0.6%** | **1.43 ± 0.03** |
+
+One track accounts for every miss: `Generated 1011`, finished 4 of 5 attempts
+by all three seeds — identically 80%, three times. That is the track, not the
+training.
+
+**A longer run, 1.22M steps, on the same library:**
+
 | | tracks | finished ≥ once | mean finish rate | median best/par | beat the driver |
 |---|---|---|---|---|---|
-| **held-out** (unseen seeds) | 16 | 16/16 | **94%** | 1.35 | **16/16** |
+| held-out | 16 | 16/16 | 94% | 1.35 | 16/16 |
 | training (16 of 48) | 16 | 16/16 | 92% | 1.36 | 16/16 |
 | zero-shot, official tracks | 4 | **0/4** | **0%** | — | — |
+
+Four times the compute did not buy reliability — 94% against 97.9% — but it
+bought pace: 1.35× par against 1.43×.
 
 **No measurable generalisation gap** — 94% against 92%, 1.35 against 1.36 on
 time. The held-out figure being marginally higher is noise; what it rules out
@@ -537,8 +556,9 @@ achieved ratio **0.11 → 0.46**, **38 → 75** transitions/second, gradient ste
 
 Stated plainly, because the result above is easy to over-read:
 
-- **One training seed.** The generalisation result is a single run. No repeats,
-  no error bars on anything here.
+- **Three seeds, one configuration.** The spread is over repeats of the same
+  setup — one architecture, one reward, one set of hyperparameters. Nothing
+  here is an ablation, and the single-track search results are still n = 1.
 - **No learned baseline.** The scripted driver is a floor, not a competitor.
   Nothing is measured against Linesight, TMRL, GT Sophy or a standard algorithm.
 - **Par is a convention**, not a standard — on generated tracks it is the

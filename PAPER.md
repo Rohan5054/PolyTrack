@@ -350,28 +350,46 @@ failure is always one steering input away.
 
 ### 6.1 Generalisation to unseen tracks
 
-A single IQN policy was trained for 1,220,000 gradient steps (28.5 hours, six
-collectors) on 48 procedurally generated tracks, with the full nine-action
-space. It was evaluated with five greedy attempts per track — greedy is not
+Three IQN policies were trained from independent seeds, 300,000 gradient steps
+each (~3.2 h, six collectors, full nine-action space), on 48 procedurally
+generated tracks. Each was evaluated with five greedy attempts — greedy is not
 deterministic, since IQN samples fresh quantile fractions each forward pass —
-on 16 tracks generated from disjoint seeds, and for comparison on 16 of the
-training tracks.
+on 16 tracks generated from disjoint seeds. 240 held-out episodes in total.
+
+| seed | tracks finished ≥ once | mean finish rate | median best/par |
+|---|---|---|---|
+| 1 | 16/16 | 99 % | 1.39 |
+| 2 | 16/16 | 98 % | 1.46 |
+| 3 | 16/16 | 98 % | 1.44 |
+| **across seeds** | **100 ± 0 %** | **97.9 ± 0.6 %** | **1.43 ± 0.03** |
+
+Spread is half the range. **One track accounts for every miss**: `Generated
+1011` was finished on four attempts of five by all three seeds — identically
+80 %, three times — and every other track was finished every time by every
+seed. That is a property of that track, not of training, and it is what a
+pooled average conceals.
+
+A fourth policy trained to **1,220,000 steps over 28.5 hours** was measured
+first, on the same held-out library, and also against 16 of its training
+tracks:
 
 | | tracks | finished ≥ once | mean finish rate | median best/par | beat the driver |
 |---|---|---|---|---|---|
-| **held-out** | 16 | 16/16 | **94 %** | 1.35 | **16/16** |
+| held-out | 16 | 16/16 | 94 % | 1.35 | 16/16 |
 | training | 16 | 16/16 | 92 % | 1.36 | 16/16 |
 | zero-shot, official | 4 | **0/4** | **0 %** | — | — |
 
-**There is no measurable generalisation gap.** 94 % against 92 %, and 1.35
-against 1.36 on time. The held-out figure being marginally higher is noise; what
-it rules out is memorisation of 48 layouts. Against the scripted baseline the
-policy is **1.55× faster** on held-out tracks (median, range 1.37–1.73).
+**There is no measurable generalisation gap**: 94 % held-out against 92 % on
+the tracks it trained on, and 1.35 against 1.36 on time. What that rules out is
+memorisation of 48 layouts.
+
+Four times the compute did not buy reliability — 94 % against the seeds'
+97.9 % — and that run's own curve agrees, falling from 93 % at 987,000 steps to
+87 % at 1.22 M. It bought pace: 1.35× par against 1.43×. Against the scripted
+baseline it is **1.55× faster** on held-out tracks (median, range 1.37–1.73).
 
 Most of the learning is early: 82 % finish rate by 257,000 steps and roughly
-flat thereafter, with the greedy policy completing every track in the windows
-around 735,000–987,000 steps. The final million gradient steps bought very
-little.
+flat thereafter.
 
 **The zero-shot row is the honest limitation**, and it is not a near miss. The
 policy reaches 3.1 %, 2.9 %, 23.5 % and 1.5 % of the four official tracks
@@ -446,8 +464,11 @@ constrains what any trajectory parameterisation can represent.
 
 > **STATUS: WRITTEN. Keep this section in any submitted version.**
 
-- **One training seed.** The generalisation result in §6.1 is a single run.
-  No repeats, so no error bars on any figure in this paper.
+- **Three seeds, one configuration.** §6.1 repeats the training run three
+  times, which gives a spread on the headline figure. It does not vary
+  anything else — one architecture, one reward, one set of hyperparameters —
+  so nothing here is an ablation.
+- **The single-track search results are still n = 1.** §6.2 was not repeated.
 - **No learned baseline.** The scripted driver is a floor, not a competitor.
   Nothing here is measured against Linesight, TMRL, GT Sophy or any standard
   RL algorithm on a common task.

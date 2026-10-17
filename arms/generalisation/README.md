@@ -1,26 +1,56 @@
 # Generalisation: trained on generated tracks, measured on unseen ones
 
-**A policy trained on 48 procedurally generated tracks finishes 94% of attempts
-on 16 it has never seen, and beats the scripted driver on all 16.**
+**Three independently seeded policies each finish every one of 16 unseen
+generated tracks, at 97.9% ± 0.6% of attempts.**
 
 The experiment the whole project was built for, and the first result here that
 is about driving rather than about one lap.
 
-## Result
+## Result, three seeds
 
-| | tracks | finished at least once | mean finish rate | median best/par | beat the driver |
+Each seed: a separate IQN policy, 300,000 gradient steps (~3.2 h, six
+collectors, full nine-action space), evaluated with five greedy attempts on
+each of 16 tracks generated from seeds disjoint from the 48 it trained on.
+240 held-out episodes in total.
+
+| seed | tracks finished >= once | mean finish rate | median best/par |
+|---|---|---|---|
+| 1 | 16/16 | 99% | 1.39 |
+| 2 | 16/16 | 98% | 1.46 |
+| 3 | 16/16 | 98% | 1.44 |
+| **across seeds** | **100% ± 0%** | **97.9% ± 0.6%** | **1.43 ± 0.03** |
+
+Spread is half the range. `seeds_heldout.log` is the raw output;
+`scripts/aggregate_seeds.py` pools it.
+
+**One track accounts for every miss.** `Generated 1011` was finished on 4 of 5
+attempts by all three seeds -- identically 80%, three times. Every other track
+was finished every time by every seed. That is a property of that track rather
+than of training, and it is the thing a pooled average hides.
+
+## The long run, and what the extra compute bought
+
+A single policy trained to **1,220,000 steps over 28.5 hours** was measured
+first, and against the same held-out library:
+
+| | tracks | finished >= once | mean finish rate | median best/par | beat the driver |
 |---|---|---|---|---|---|
-| **held-out** (unseen seeds) | 16 | 16/16 | **94%** | 1.35 | **16/16** |
-| training (first 16 of 48) | 16 | 16/16 | 92% | 1.36 | 16/16 |
-| zero-shot, official tracks | 4 | **0/4** | **0%** | -- | -- |
+| held-out | 16 | 16/16 | 94% | 1.35 | 16/16 |
+| training (16 of 48) | 16 | 16/16 | 92% | 1.36 | 16/16 |
+| zero-shot, official | 4 | **0/4** | **0%** | -- | -- |
 
-**There is no measurable generalisation gap.** Held-out finish rate is 94%
-against 92% on training tracks, and the median time-to-par is 1.35 against
-1.36. The held-out number being marginally *higher* is noise, not an effect;
-what it rules out is memorisation.
+**There is no measurable generalisation gap**: 94% held-out against 92% on the
+tracks it trained on, 1.35 against 1.36 on time. What that rules out is
+memorising 48 layouts.
 
-Against the floor, the policy is **1.55x faster than the scripted driver** on
-held-out tracks (median; range 1.37-1.73) and beat it on every single one.
+Four times the compute did **not** buy reliability -- 94% against the seeds'
+97.9% -- and the long run's own curve agrees, dipping from 93% at 987k steps to
+87% at 1.22M. What it bought was pace: 1.35x par against 1.43x. If finishing
+matters, 300k steps is enough and cheaper; if lap time matters, the extra
+million steps is worth about 6%.
+
+Against the floor, the long run is **1.55x faster than the scripted driver** on
+held-out tracks (median; range 1.37-1.73) and beat it on every one.
 
 ## What the zero-shot row means, and does not
 

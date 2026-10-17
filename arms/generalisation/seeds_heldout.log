@@ -1,0 +1,93 @@
+######## SEED 1 ########
+
+  runs\gen_seed1\agent.pt at 300,032 gradient steps
+  tracks_heldout.npz: 16 tracks, 5 attempts each
+  actions: all 9
+
+    track             finished      best      par  best/par    driver
+                              (% reached if never finished)
+
+    Generated 1000       100%    11.03s    8.97s      1.23        --
+    Generated 1001       100%    19.70s   15.07s      1.31        --
+    Generated 1002       100%    23.20s   15.03s      1.54        --
+    Generated 1003       100%    30.29s   22.42s      1.35        --
+    Generated 1004       100%    29.54s   23.05s      1.28        --
+    Generated 1005       100%    13.86s    9.51s      1.46        --
+    Generated 1006       100%    35.46s   24.83s      1.43        --
+    Generated 1007       100%    23.93s   15.30s      1.56        --
+    Generated 1008       100%    22.83s   15.62s      1.46        --
+    Generated 1009       100%    29.11s   18.40s      1.58        --
+    Generated 1010       100%    30.60s   24.26s      1.26        --
+    Generated 1011        80%    40.22s   27.48s      1.46        --
+    Generated 1012       100%    24.86s   19.44s      1.28        --
+    Generated 1013       100%    29.36s   23.06s      1.27        --
+    Generated 1014       100%    27.11s   20.50s      1.32        --
+    Generated 1015       100%    35.79s   24.85s      1.44        --
+
+  tracks finished at least once : 16/16 (100%)
+  mean finish rate per attempt  : 99%
+  median best time / par        : 1.39
+
+
+######## SEED 2 ########
+
+  runs\gen_seed2\agent.pt at 300,032 gradient steps
+  tracks_heldout.npz: 16 tracks, 5 attempts each
+  actions: all 9
+
+    track             finished      best      par  best/par    driver
+                              (% reached if never finished)
+
+    Generated 1000       100%    10.50s    8.97s      1.17        --
+    Generated 1001       100%    20.01s   15.07s      1.33        --
+    Generated 1002       100%    24.21s   15.03s      1.61        --
+    Generated 1003       100%    29.27s   22.42s      1.31        --
+    Generated 1004       100%    31.59s   23.05s      1.37        --
+    Generated 1005       100%    14.94s    9.51s      1.57        --
+    Generated 1006       100%    37.65s   24.83s      1.52        --
+    Generated 1007       100%    23.57s   15.30s      1.54        --
+    Generated 1008       100%    23.11s   15.62s      1.48        --
+    Generated 1009       100%    30.96s   18.40s      1.68        --
+    Generated 1010       100%    32.16s   24.26s      1.33        --
+    Generated 1011        80%    40.28s   27.48s      1.47        --
+    Generated 1012       100%    25.14s   19.44s      1.29        --
+    Generated 1013       100%    30.72s   23.06s      1.33        --
+    Generated 1014        80%    29.59s   20.50s      1.44        --
+    Generated 1015       100%    36.49s   24.85s      1.47        --
+
+  tracks finished at least once : 16/16 (100%)
+  mean finish rate per attempt  : 98%
+  median best time / par        : 1.45
+
+
+######## SEED 3 ########
+
+  runs\gen_seed3\agent.pt at 300,032 gradient steps
+  tracks_heldout.npz: 16 tracks, 5 attempts each
+  actions: all 9
+
+    track             finished      best      par  best/par    driver
+                              (% reached if never finished)
+
+    Generated 1000       100%    11.23s    8.97s      1.25        --
+    Generated 1001       100%    20.07s   15.07s      1.33        --
+    Generated 1002       100%    24.38s   15.03s      1.62        --
+    Generated 1003       100%    30.64s   22.42s      1.37        --
+    Generated 1004       100%    31.88s   23.05s      1.38        --
+    Generated 1005       100%    15.55s    9.51s      1.63        --
+    Generated 1006       100%    36.38s   24.83s      1.47        --
+    Generated 1007       100%    24.16s   15.30s      1.58        --
+    Generated 1008       100%    23.30s   15.62s      1.49        --
+    Generated 1009       100%    30.18s   18.40s      1.64        --
+    Generated 1010       100%    32.04s   24.26s      1.32        --
+    Generated 1011        80%    41.09s   27.48s      1.49        --
+    Generated 1012       100%    26.46s   19.44s      1.36        --
+    Generated 1013        80%    28.77s   23.06s      1.25        --
+    Generated 1014       100%    28.74s   20.50s      1.40        --
+    Generated 1015       100%    38.01s   24.85s      1.53        --
+
+  tracks finished at least once : 16/16 (100%)
+  mean finish rate per attempt  : 98%
+  median best time / par        : 1.43
+
+
