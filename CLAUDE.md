@@ -30,19 +30,19 @@ pip install -e .[learning]      # torch is training-only; the rest runs without
 python tests/test_core.py       # 24 tests
 python tests/test_search.py     # 17 tests
 python tests/test_trackcode.py  # 12 tests
-python tests/test_wasm.py       # 17 tests
+python tests/test_wasm.py       # 19 tests
 python tests/test_recording.py  # 14 tests
 python tests/test_reference.py  # 18 tests
-python tests/test_learning.py   # 20 tests
+python tests/test_learning.py   # 23 tests
 python tests/test_spline.py     #  6 tests
 python tests/test_generator.py  # 12 tests
-python tests/test_pursuit.py    #  7 tests
+python tests/test_pursuit.py    #  8 tests
 python tests/test_corridor.py   #  5 tests
 python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 152 pass. Four of the suites reach for files that are not in the repo and
+All 157 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -414,6 +414,26 @@ because below is somewhere to land and above is a ceiling.
 three, and it passes only if the part rotation, the rasterisation and the height
 query are simultaneously right. A map that called everything solid would pass it
 too, so `test_the_map_distinguishes_road_from_void` is its other half.
+
+**A wasm backend does not free itself.** Its imports are `Func`s over bound
+methods, the `Instance` holds the `Func`s and the module holds the `Instance`:
+a cycle routed through wasmtime's C types, where the cycle collector cannot
+follow. `del` plus `gc.collect()` frees nothing, and build-and-drop measured
+**29 MB of private commit each, linearly**. Call `WasmPhysics.close()`, which
+deletes the car model and then `dispose()`s the module; with that, 24 rebuilds
+cost the same as one. `EnvCache` does this on eviction.
+
+This only bites once something rebuilds backends. Bounding the collector's
+environment cache is what started it -- an unbounded cache built 48 and
+stopped, a bounded one rebuilds about one per episode -- so the bound turned a
+large fixed footprint into an unbounded leak, 1.6 GB a worker growing to 5.8 GB
+in seventy minutes, 48.7 GB of commit against a 49.8 GB limit. The fix is
+tested by `test_building_and_closing_backends_does_not_grow_memory`.
+
+Compiling is the other half: an `Engine` owns JIT code that is never handed
+back, so `_COMPILED` keeps one engine and module per `.wasm` per process. Each
+backend still gets its own `Store`, which is what save/restore and determinism
+depend on. Build cost fell from 226 ms to 141 ms.
 
 **A reference line is a route, not a centerline.** A track code says where every
 piece of road is and nothing about the order they are driven in, so

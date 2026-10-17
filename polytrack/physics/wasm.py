@@ -351,6 +351,32 @@ def _slot_setter(kind: str):
     raise WasmUnavailable(f"unsupported parameter type {kind!r}")
 
 
+
+#: One compiled module per .wasm file, per process. Compiling is the expensive
+#: and leaky half of building a backend: an `Engine` owns JIT-compiled code and
+#: its metadata, and dropping the Python handle does not hand that memory back.
+#: Measured before this cache, building and dropping a backend cost **29 MB of
+#: private commit each, linearly**, with `del` and an explicit `gc.collect()` --
+#: which turned a bounded environment cache into an unbounded leak, because a
+#: bounded cache rebuilds, and every rebuild recompiled.
+#:
+#: A `Module` is tied to its `Engine` and can be instantiated into any number of
+#: `Store`s on that engine, so sharing costs nothing in isolation: each backend
+#: still gets its own `Store` and therefore its own linear memory, which is what
+#: save/restore and determinism depend on.
+_COMPILED: "dict[Path, tuple[Engine, Module]]" = {}
+
+
+def _compiled(resolved: Path) -> "tuple[Engine, Module]":
+    """The engine and compiled module for one .wasm, compiled at most once."""
+    hit = _COMPILED.get(resolved)
+    if hit is None:
+        engine = Engine()
+        hit = (engine, Module(engine, resolved.read_bytes()))
+        _COMPILED[resolved] = hit
+    return hit
+
+
 class WasmModule:
     """One instance of ``polytrack_physics.wasm`` under wasmtime.
 
@@ -365,10 +391,29 @@ class WasmModule:
         "_data_ptr", "_data_len", "_stdout",
     )
 
+    def dispose(self) -> None:
+        """Drop the instance and its linear memory.
+
+        Refcounting alone does not reclaim it. The imports are `Func`s built
+        over bound methods of this object, the `Instance` holds the `Func`s and
+        this object holds the `Instance`, so the whole thing is a cycle -- and
+        it is routed through wasmtime's C extension types, which the cycle
+        collector cannot traverse. `del` plus `gc.collect()` therefore frees
+        nothing, which is how a bounded environment cache turned into a leak of
+        24 MB per rebuild.
+
+        Idempotent, because the owning backend may be closed more than once.
+        """
+        self._bound.clear()
+        self._exports = None
+        self.memory = None
+        self.instance = None
+        self.store = None
+
     def __init__(self, path: str | Path | None = None, *, now_ms: float = 0.0) -> None:
         resolved = _resolve_wasm(path)
-        self.store = Store(Engine())
-        module = Module(self.store.engine, resolved.read_bytes())
+        engine, module = _compiled(resolved)
+        self.store = Store(engine)
         self._stdout: dict[int, bytearray] = {1: bytearray(), 2: bytearray()}
         self.memory: Memory | None = None
         self._data_ptr = None
@@ -839,7 +884,16 @@ class WasmPhysics:
         return bool(self.module.call("s"))
 
     def close(self) -> None:
+        """Delete the car model, then release the module's memory.
+
+        Deleting the car alone leaves the 24 MB linear memory alive, which is
+        fine for a process that builds one backend and exits, and is a leak for
+        a collector that rebuilds one per episode.
+        """
+        if self.module.store is None:
+            return
         self.module.call("q", self.car_id)
+        self.module.dispose()
 
     # -- state --------------------------------------------------------------
 

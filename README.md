@@ -53,7 +53,7 @@ That is one track. See [What this does not show](#what-this-does-not-show).
 | **Generalisation to unseen tracks** | **Done — 97.9% ± 0.6% over three seeds, 16 held-out tracks** |
 | Scripted pure-pursuit driver | Done — drivability filter and baseline floor |
 
-**152 tests passing.** Four suites reach for files not in the repo and are
+**157 tests passing.** Four suites reach for files not in the repo and are
 stronger when they find them; without them they skip and say so.
 
 ## Quick start
@@ -63,13 +63,13 @@ pip install -e .[learning]      # torch is training-only
 python tests/test_core.py       # 24
 python tests/test_search.py     # 17
 python tests/test_trackcode.py  # 12
-python tests/test_wasm.py       # 17  (needs the game files)
+python tests/test_wasm.py       # 19  (needs the game files)
 python tests/test_recording.py  # 14
 python tests/test_reference.py  # 18  (needs the game files)
-python tests/test_learning.py   # 20  (needs torch)
+python tests/test_learning.py   # 23  (needs torch)
 python tests/test_spline.py     #  6
 python tests/test_generator.py  # 12  (4 need the game files)
-python tests/test_pursuit.py    #  7
+python tests/test_pursuit.py    #  8
 python tests/test_corridor.py   #  5  (needs the game files)
 python scripts/smoke_test.py
 python scripts/verify_baselines.py   # re-verify every banked lap + substrate

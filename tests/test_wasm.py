@@ -390,6 +390,57 @@ def test_the_car_actually_drives():
     assert abs(np.linalg.norm(result.state.velocity) - result.info["speed_kmh"] / 3.6) < 1.0
 
 
+def test_building_and_closing_backends_does_not_grow_memory():
+    """A rebuilt backend must hand its linear memory back.
+
+    Refcounting does not do it: the imports are Funcs over bound methods, the
+    Instance holds the Funcs and the module holds the Instance, and that cycle
+    runs through wasmtime's C types where the cycle collector cannot follow it.
+    Measured before the fix, build-and-drop cost 29 MB of private commit each,
+    linearly, with del and an explicit gc.collect() -- so bounding the
+    collector's environment cache converted a large fixed footprint into an
+    unbounded leak, one eviction per episode.
+
+    Checked by proxy rather than by reading the OS: after close(), the module's
+    store and instance must be gone, which is what frees the memory. The
+    end-to-end memory measurement lives in the commit message; this is the part
+    that can run anywhere.
+    """
+    backend = _backend()
+    if backend is None:
+        return
+    module = backend.module
+    assert module.store is not None and module.instance is not None
+
+    backend.close()
+    assert module.store is None, "close() must release the store"
+    assert module.instance is None, "close() must release the instance"
+    assert not module._bound, "close() must drop the bound export cache"
+
+    backend.close()  # idempotent: a cache may close an entry more than once
+
+
+def test_the_compiled_module_is_shared_between_backends():
+    """Compiling per backend is the other half of the cost: 226 ms -> 141 ms."""
+    from polytrack.physics.wasm import _COMPILED, _resolve_wasm, WasmUnavailable
+
+    first = _backend()
+    if first is None:
+        return
+    try:
+        resolved = _resolve_wasm(None)
+    except WasmUnavailable:
+        return
+    assert resolved in _COMPILED
+    engine, module = _COMPILED[resolved]
+
+    second = _backend()
+    assert second is not None
+    assert _COMPILED[resolved][1] is module, "the module should be compiled once"
+    # Separate stores, though -- save/restore and determinism depend on it.
+    assert first.module.store is not second.module.store
+
+
 if __name__ == "__main__":
     import sys
     import traceback

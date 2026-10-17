@@ -168,7 +168,18 @@ class EnvCache:
         self.builds += 1
         self._entries[key] = built
         while len(self._entries) > self._limit:
-            self._entries.popitem(last=False)
+            _, evicted = self._entries.popitem(last=False)
+            # Dropping the reference is not enough. A backend's linear memory
+            # sits behind a reference cycle through wasmtime's C types, which
+            # the cycle collector cannot traverse, so an eviction without this
+            # leaks 24 MB -- and a bounded cache evicts once per episode.
+            backend = getattr(evicted, "backend", None)
+            closer = getattr(backend, "close", None)
+            if closer is not None:
+                try:
+                    closer()
+                except Exception:  # pragma: no cover - teardown is best effort
+                    pass
         return built
 
 
