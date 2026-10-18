@@ -1,0 +1,16 @@
+group,share_of_violations,frames_outside
+vel_fwd,0.042735,0.00234055
+vel_left,0.0149573,0.000819193
+vel_up,0,0
+speed,0,0
+angvel_x,0,0
+angvel_y,0.0277778,0.00152136
+angvel_z,0.00213675,0.000117028
+airborne,0,0
+wheel_fl,0,0
+wheel_fr,0,0
+wheel_rl,0,0
+wheel_rr,0,0
+lateral_offset,0,0
+lookahead,0.912393,0.00924517
+rays,0,0

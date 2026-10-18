@@ -81,6 +81,89 @@ human-designed tracks, which is large, rather than a failure to generalise
 within a distribution, which did not happen. Closing it is a generator problem
 -- more of the part vocabulary -- not a learning one.
 
+That paragraph used to end there, as an inference. It is now measured.
+
+## The distance, measured
+
+`scripts/measure_support.py` takes the band between the 0.1st and 99.9th
+percentile of every observation feature the policy saw while driving its 48
+training tracks -- 24,545 frames -- and counts how far outside that band the
+observation sits on other tracks.
+
+| | frames with any feature outside | features outside, of 62 |
+|---|---|---|
+| **control**: 16 unseen *generated* tracks, 16/16 finished | **1 %** | **0.0 -- 0.1** |
+| **test**: 4 official tracks, 0/4 finished | **57 -- 62 %** | **7.0 -- 9.2** |
+
+**The control is the point.** An out-of-support count means nothing on its own,
+because a band estimated too tightly reports one for every track including the
+ones the policy drives perfectly. Unseen tracks from the training distribution
+sit inside the band; the official tracks are **147-154x further outside it**.
+Ranges are two passes of the same measurement: greedy is not deterministic
+here, IQN resamples its quantile fractions every forward pass, so the
+measurement itself carries about +/-15%. Both passes are in `support/`.
+
+**It is out of distribution at step 0, on all four tracks** -- arc 0.0 m, car
+stationary on the start line, before an action is taken. Not progressively, as
+the car drives into unfamiliar geometry. The one track that got furthest,
+Summer 1 at 23.5% of its lap, is also the least out of distribution at 1.4-1.7
+features per frame against 7.4-12.5 for the other three.
+
+## What the measurement cannot see, and what nearly broke it
+
+**12 of the 62 features cannot register a violation at all.** `airborne` and
+the four wheel-contact flags are 0/1 and training contains both values; the
+nine rays are distances normalised into `[0.0833, 1]` and training spans the
+whole interval. A bounded feature saturated in training lies outside no band by
+construction, which is why `rays` reads 0% on every track in the table. The
+test has eyes only for the unbounded features.
+
+**95% of the violations are `lookahead`** -- and the lookahead points and
+`lateral_offset` are measured *against the reference line*, which the two
+libraries get from different places. A generated track's line is its own
+centreline; an official track's is a human lap, and a racing line cuts corners.
+So most of that 147x was, on the face of it, dismissible as
+racing-line-against-centreline rather than road-against-road.
+
+`scripts/measure_line_confound.py` settles it by changing one variable. Take 12
+tracks the policy **trained on**, keep the road exactly as it is, and swap only
+the line -- from the generator's centreline to a line derived from a lap the
+policy itself drove, built the same way every official track's line was.
+
+| line on the same 12 roads | frames with any OOS | features per frame |
+|---|---|---|
+| centreline (as trained) | 1 % | **0.03** |
+| derived from a driven lap | 20 % | **0.77** |
+| *official tracks, for scale* | *62 %* | *9.2* |
+
+Line provenance is **real but small: it accounts for at most 8%** of the
+official-track distance. The remaining ~92% is the road. Two unconfoundable
+features agree, since nothing about where a line runs makes a car roll or
+fall: `vel_up` reaches **4.4x** beyond the training band on official tracks and
+`angvel_z` **10x** -- elevation and roll, which a flat grid of right-angle
+corners cannot produce.
+
+A two-track pilot of this said 1%, and was wrong, because relining does nothing
+on some roads (Generated 0, 1) and a great deal on others (Generated 7 and 11
+reach 4.4 and 3.2 features per frame). Twelve tracks is the smallest honest
+version of it.
+
+## What the measurement licenses
+
+* The 0/4 is **distribution distance, quantified** -- not a learning failure
+  and no longer an inference.
+* It is **not a near miss to polish**. The policy is outside its training
+  support before it moves.
+* Closing it is a **generator** problem, and the measurement names the
+  features to aim at: elevation (`vel_up`) and roll (`angvel_z`) first.
+* It says nothing about whether the *representation* transfers. That needs a
+  fine-tune against a from-scratch control, which has not been run.
+
+Artifacts in `support/`: `pass1.log`, `pass2.log`, `support_band.csv` (the band
+itself, reusable via `--band` so re-analysis costs minutes rather than the 30
+the 48 training laps take), `groups_*.csv`, `line_confound.log` and
+`line_confound.csv`.
+
 ## Setup
 
 * **Policy**: IQN, 1,220,000 gradient steps over 28.5 hours, six collectors,
@@ -115,7 +198,12 @@ very little, which is worth knowing before budgeting a repeat.
 
 ## What this still does not show
 
-* **One seed.** No repeats, so no error bars on any of it.
+* **The long run is one seed.** The 300k result has three and carries error
+  bars; every figure in the 1.22M table above is a single sample, including the
+  0/4 -- though the support measurement that explains it was run twice.
+* **No transfer result.** Zero-shot failing says nothing either way about
+  whether the learned representation helps when fine-tuned on an official
+  track. Nobody has run that against a from-scratch control.
 * **No learned baseline.** The scripted driver is a floor, not a competitor.
   Nothing here is measured against another algorithm.
 * **Par is a convention**, not a standard, so `best/par` compares runs within

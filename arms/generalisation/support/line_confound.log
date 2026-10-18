@@ -1,0 +1,54 @@
+
+  runs\gen1\agent.pt at 1,220,000 gradient steps
+  band from runs\support\support_band.csv
+  48 laps available in runs\gen1
+
+    track                   line   length  any OOS  mean OOS  lookahead share
+    Generated 0       centreline     849m       2%       0.0             100%
+    Generated 0       driven lap     795m       7%       0.1               0%
+    Generated 1       centreline     835m       1%       0.1              75%
+    Generated 1       driven lap     811m       6%       0.1               0%
+    Generated 2       centreline     837m       3%       0.0               0%
+    Generated 2       driven lap     820m       6%       0.1              16%
+    Generated 3       centreline     455m       0%       0.0               0%
+    Generated 3       driven lap     427m      29%       0.8              71%
+    Generated 4       centreline     849m       0%       0.0               0%
+    Generated 4       driven lap     797m      10%       0.1               0%
+    Generated 5       centreline    1028m       1%       0.0              94%
+    Generated 5       driven lap     964m      29%       0.4              77%
+    Generated 6       centreline     830m       1%       0.0             100%
+    Generated 6       driven lap     778m      17%       0.2              33%
+    Generated 7       centreline     375m       2%       0.0             100%
+    Generated 7       driven lap     350m      53%       4.4              91%
+    Generated 8       centreline     395m       2%       0.0             100%
+    Generated 8       driven lap     374m      34%       0.5              40%
+    Generated 9       centreline     453m       2%       0.1              94%
+    Generated 9       driven lap     415m      14%       0.2              30%
+    Generated 10      centreline     789m       3%       0.1              62%
+    Generated 10      driven lap     734m      22%       1.0              82%
+    Generated 11      centreline    1041m       0%       0.0              50%
+    Generated 11      driven lap     929m      26%       3.2              96%
+
+  12 tracks, each driven on both lines
+
+    line            frames with any OOS  features per frame
+    centreline                      1%                0.03
+    driven lap                     20%                0.77
+
+    group               centreline    driven lap
+    vel_fwd                    0%           1%
+    vel_left                   0%           0%
+    vel_up                     0%           1%
+    speed                      0%           0%
+    angvel_x                   0%           1%
+    angvel_y                   0%           1%
+    angvel_z                   0%           1%
+    lateral_offset             0%          10%
+    lookahead                  1%           7%
+
+  ================================================================
+  swapping ONLY the reference line moves the observation from 0.03
+  to 0.77 features out of support per frame, on the same roads.
+  Official tracks read 9.2. Line provenance explains 8% of that at most.
+  ================================================================
+

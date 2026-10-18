@@ -473,7 +473,20 @@ times; and the IQN training loop with parallel collectors.
    measurable generalisation gap. All beat the scripted driver on all 16, and
    all get 0/4 on the official tracks, reaching 1.5-23.5% of those laps before
    stalling -- the generator uses five of 186 part types on flat ground, so
-   that is distribution distance, not a learning failure. See
+   that is distribution distance, not a learning failure, and that is now
+   **measured rather than asserted**: `scripts/measure_support.py` puts the
+   official tracks 147-154x further outside the policy's own observation
+   support than unseen generated tracks, which sit inside it, and finds them
+   out of support at step 0 before the car moves. Two things make that number
+   mean something and both are easy to get wrong. The **control** -- unseen
+   tracks from the training distribution, scored on the same band -- is what
+   rules out a band too tight to be informative. And **95% of the violations
+   are `lookahead`**, which is measured against the reference line, so
+   `scripts/measure_line_confound.py` re-drives training roads with their line
+   swapped for one derived from a driven lap: provenance explains at most 8%,
+   the road the rest. Reuse the saved band with `--band` or pay 30 minutes to
+   re-drive 48 laps. Note that 12 of the 62 features are bounded and saturated
+   in training, so they cannot register a violation at all. See
    `arms/generalisation/`. **Four times the compute did not buy reliability**
    (94% against 97.9%) -- it bought pace (1.35x par against 1.43x). Budget
    300k steps unless lap time is what you want. Watch three things: `ratio`

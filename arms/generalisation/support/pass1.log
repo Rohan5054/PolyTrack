@@ -1,0 +1,137 @@
+
+  runs\gen1\agent.pt at 1,220,000 gradient steps
+  support from 48 tracks of tracks_generated.npz
+  control  : 16 unseen tracks of tracks_heldout.npz
+  tested on: 4 tracks of tracks.npz
+
+    Generated 0         579 steps     846.1 m  finished
+    Generated 1         455 steps     832.3 m  finished
+    Generated 2         460 steps     834.3 m  finished
+    Generated 3         278 steps     452.1 m  finished
+    Generated 4         620 steps     846.2 m  finished
+    Generated 5         717 steps    1024.9 m  finished
+    Generated 6         557 steps     827.0 m  finished
+    Generated 7         247 steps     372.1 m  finished
+    Generated 8         255 steps     392.1 m  finished
+    Generated 9         313 steps     450.0 m  finished
+    Generated 10        536 steps     785.9 m  finished
+    Generated 11        800 steps    1038.0 m  finished
+    Generated 12        805 steps    1140.0 m  finished
+    Generated 13        807 steps    1041.9 m  finished
+    Generated 14        729 steps    1060.9 m  finished
+    Generated 15        627 steps     886.0 m  finished
+    Generated 16        351 steps     511.1 m  finished
+    Generated 17        577 steps     780.9 m  finished
+    Generated 18        669 steps     922.9 m  finished
+    Generated 19        389 steps     591.2 m  finished
+    Generated 20        750 steps    1020.9 m  finished
+    Generated 21        394 steps     609.2 m  finished
+    Generated 22        290 steps     594.2 m  finished
+    Generated 23        750 steps    1021.9 m  finished
+    Generated 24        628 steps     763.0 m  finished
+    Generated 25        567 steps     886.1 m  finished
+    Generated 26        540 steps     670.4 m  stalled
+    Generated 27        449 steps     649.0 m  finished
+    Generated 28        436 steps     586.8 m  finished
+    Generated 29        318 steps     492.1 m  finished
+    Generated 30        379 steps     610.1 m  finished
+    Generated 31        566 steps     843.0 m  finished
+    Generated 32        394 steps     567.1 m  finished
+    Generated 33        417 steps     672.3 m  finished
+    Generated 34        372 steps     549.2 m  finished
+    Generated 35        411 steps     649.2 m  finished
+    Generated 36        278 steps     453.2 m  finished
+    Generated 37        576 steps     930.2 m  finished
+    Generated 38        735 steps    1045.1 m  finished
+    Generated 39        378 steps     549.0 m  finished
+    Generated 40        790 steps    1142.0 m  finished
+    Generated 41        307 steps     471.2 m  finished
+    Generated 42        441 steps     550.1 m  finished
+    Generated 43        398 steps     592.2 m  finished
+    Generated 44        770 steps    1141.1 m  finished
+    Generated 45        414 steps     589.0 m  finished
+    Generated 46        537 steps     826.0 m  finished
+    Generated 47        489 steps     708.1 m  finished
+
+  24,545 training frames, 62 features
+  features that never varied in training (0): none
+
+
+  CONTROL -- unseen, same distribution (tracks_heldout.npz)
+
+    track             steps  reached   outcome  any OOS  mean OOS  first OOS  % of run
+    Generated 1000      224     374m  finished       0%       0.0    step 26        6%
+      lookahead[23] (0%), lookahead[25] (0%)
+    Generated 1001      410     632m  finished       0%       0.0      never      nan%
+    Generated 1002      422     585m  finished       0%       0.0      never      nan%
+    Generated 1003      569     927m  finished       1%       0.0   step 361       55%
+      lookahead[39] (1%), lookahead[37] (1%), lookahead[35] (1%)
+    Generated 1004      634     969m  finished       1%       0.0   step 365       58%
+      lookahead[17] (1%), angvel_z (0%), lookahead[19] (0%)
+    Generated 1005      287     371m  finished       1%       0.0   step 283      100%
+      vel_left (1%), angvel_y (1%), lookahead[18] (1%), lookahead[20] (1%), lookahead[16] (0%), angvel_x (0%)
+    Generated 1006      684    1002m  finished       3%       0.1   step 202       24%
+      lookahead[34] (2%), lookahead[32] (2%), lookahead[28] (1%), lookahead[30] (1%), lookahead[36] (1%), lookahead[26] (1%)
+    Generated 1007      422     606m  finished       0%       0.0   step 254       56%
+      lookahead[27] (0%), lookahead[25] (0%), lookahead[23] (0%), lookahead[29] (0%), lookahead[21] (0%)
+    Generated 1008      506     627m  finished       1%       0.0   step 181       32%
+      lookahead[23] (1%), lookahead[21] (1%), lookahead[37] (0%)
+    Generated 1009      515     724m  finished       1%       0.0   step 264       48%
+      angvel_z (0%), lookahead[21] (0%), lookahead[23] (0%)
+    Generated 1010      628    1029m  finished       0%       0.0   step 354       55%
+      angvel_x (0%)
+    Generated 1011      804    1121m  finished       0%       0.0   step 242       30%
+      angvel_x (0%)
+    Generated 1012      541     809m  finished       4%       0.2   step 156       26%
+      lookahead[12] (3%), lookahead[10] (3%), lookahead[8] (3%), lookahead[6] (2%), lookahead[14] (2%), lookahead[2] (2%)
+    Generated 1013      578     968m  finished       3%       0.3   step 549      100%
+      lookahead[18] (3%), lookahead[20] (3%), lookahead[16] (3%), lookahead[22] (2%), lookahead[14] (2%), vel_fwd (2%)
+    Generated 1014      536     847m  finished       0%       0.0   step 148       24%
+      lookahead[23] (0%), lookahead[27] (0%), lookahead[25] (0%)
+    Generated 1015      770    1024m  finished       1%       0.0   step 371       45%
+      lookahead[23] (1%), lookahead[25] (1%), lookahead[27] (1%), lookahead[21] (1%), lookahead[29] (0%), lookahead[33] (0%)
+
+    frames with any feature out of support : 1%
+    features out of support per frame      : 0.0 of 62
+
+  TEST -- official tracks (tracks.npz)
+
+    track             steps  reached   outcome  any OOS  mean OOS  first OOS  % of run
+    Winter 5            125      57m   stalled      54%       7.4     step 0        0%
+      lookahead[12] (46%), lookahead[18] (46%), lookahead[16] (46%), lookahead[14] (46%), lookahead[20] (45%), lookahead[22] (43%)
+    Desert 3            181      55m   stalled      73%      10.4     step 0        0%
+      lookahead[17] (49%), lookahead[19] (48%), lookahead[21] (48%), lookahead[18] (45%), lookahead[16] (42%), lookahead[20] (42%)
+    Summer 1            230     308m   stalled      47%       1.7     step 0        0%
+      lookahead[36] (19%), lookahead[34] (19%), lookahead[38] (18%), lateral_offset (17%), vel_up (14%), lookahead[5] (10%)
+    Summer 5            148      63m   stalled      53%       8.6     step 0        0%
+      lookahead[17] (37%), lateral_offset (36%), lookahead[19] (33%), lookahead[21] (32%), lookahead[23] (30%), lookahead[15] (29%)
+
+    frames with any feature out of support : 57%
+    features out of support per frame      : 7.0 of 62
+
+  per-group range: training band, control, official
+
+    group                    training band               control              official
+    vel_fwd                [-0.0477, 1.23]       [-0.0923, 1.12]       [-0.202, 0.871]
+    vel_left               [-0.097, 0.105]        [-0.108, 0.11]      [-0.106, 0.0615]
+    vel_up               [-0.0749, 0.0422]      [-0.0351, 0.043]      [-0.303, 0.0255]
+    speed                        [0, 1.23]             [0, 1.12]            [0, 0.871]
+    angvel_x                [-0.533, 0.18]        [-0.175, 1.03]       [-0.119, 0.155]
+    angvel_y               [-0.231, 0.218]       [-0.724, 0.268]       [-0.384, 0.172]
+    angvel_z               [-0.168, 0.302]        [-0.239, 0.25]        [-1.62, 0.157]
+    airborne                        [0, 1]                [0, 1]                [0, 1]
+    wheel_fl                        [0, 1]                [0, 1]                [0, 1]
+    wheel_fr                        [0, 1]                [0, 1]                [0, 1]
+    wheel_rl                        [0, 1]                [0, 1]                [0, 1]
+    wheel_rr                        [0, 1]                [0, 1]                [0, 1]
+    lateral_offset          [0.0519, 1.93]         [0.051, 0.85]             [0, 3.95]
+    lookahead                  [-0.903, 1]           [-0.913, 1]        [-0.656, 1.13]
+    rays                       [0.0833, 1]           [0.0833, 1]           [0.0833, 1]
+
+  ================================================================
+  control 0.0 features out of support per frame, official 7.0
+  official tracks are 154.0x further outside the training distribution
+  ================================================================
+
+  artifacts in runs\support/
+
