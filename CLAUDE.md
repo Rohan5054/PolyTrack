@@ -42,7 +42,7 @@ python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 157 pass. Four of the suites reach for files that are not in the repo and
+All 158 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —

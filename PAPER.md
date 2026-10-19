@@ -15,7 +15,8 @@
 
 ## Abstract
 
-> **STATUS: WRITTEN, but the second half is contingent on the GAP sections.**
+> **STATUS: WRITTEN. Every figure in it is measured and in the repo; no claim
+> here depends on a GAP section any more.**
 
 Reinforcement learning environments for racing are usually built by
 reimplementing a game's dynamics, which makes fidelity to the original
@@ -31,9 +32,21 @@ game's own replay verifier, which we execute unmodified and which agrees with
 every lap our agents produce. We further contribute a procedural track
 generator which emits valid track codes the game loads, and which returns each
 track's route by construction, removing the need for a human lap before a new
-track can be trained on. We report a learned policy and a policy-guided beam
-search on one track, where the combination is 239 ms faster than the human
-reference lap. We do **not** yet report generalisation results.
+track can be trained on. Three independently seeded policies trained on 48
+generated tracks each finish all 16 of a held-out set, at **97.9 ± 0.6 %** of
+attempts, and a longer run shows **no measurable generalisation gap** — 94 % on
+unseen tracks against 92 % on its own training tracks. The same policies
+transfer to none of the game's four official tracks, and we quantify why rather
+than asserting it: measured against the 0.1st–99.9th percentile band of every
+observation feature the policy saw in training, unseen *generated* tracks fall
+inside the band while the official tracks sit **147–154× further outside it**,
+already out of support at the first frame before the car moves. We isolate the
+obvious confound — that a generated track's reference line is its own
+centreline while an official track's comes from a human lap — by re-driving
+training roads with only the line's provenance swapped, which accounts for at
+most 8 % of that distance. We also report a learned policy and a policy-guided
+beam search on one official track, where the combination is 239 ms faster than
+the human reference lap.
 
 ---
 
@@ -57,7 +70,7 @@ wrong by 1.8 × 10⁻⁴ was invisible, drivable at 308 km/h, and still threw a
 400 km/h wall-ride clean off the track thirteen seconds later — on one of four
 tracks and not the other three.
 
-We make three contributions.
+We make four contributions.
 
 **(1) A method for building a faithful environment from a shipped game.** We
 host the game's compiled physics module from Python, capture rather than
@@ -68,8 +81,22 @@ against two independent oracles (§3).
 loads and that yields each track's route by construction, removing the
 reference-lap bootstrap that otherwise gates every new track (§4).
 
-**(3) An agent and search stack** built on the above, with results on one track
-and an explicit account of what they do and do not establish (§5, §6).
+**(3) An agent and search stack** built on the above: policies that generalise
+across procedurally generated tracks with error bars over three training seeds,
+a policy-guided search that beats the human reference lap on an official track,
+and an explicit account of what each does and does not establish (§5, §6).
+
+**(4) A protocol for telling out-of-distribution transfer failure apart from
+learning failure**, and for separating it from the confounds of the
+environment's own construction (§6.2). Our policies finish 100 % of unseen
+tracks from their training distribution and 0 % of the game's official ones.
+Attributing that to distributional distance is a claim about the observation
+space, so we measure it there — against a percentile band of what the policy
+actually saw — and make it interpretable with a control arm of unseen
+in-distribution tracks, without which any such count is unfalsifiable. We then
+isolate the one asymmetry in how the two track sets are built. The protocol is
+not specific to racing; it applies wherever an agent is evaluated on tasks a
+generator did not produce.
 
 ---
 
@@ -247,7 +274,8 @@ search (§5.2) affordable. This figure had been recorded in our own notes as
 
 ## 4. Procedural track generation
 
-> **STATUS: WRITTEN. The generator works; nothing has been trained on it (§7).**
+> **STATUS: WRITTEN. The generator works and policies have been trained on it
+> (§6.1); its narrowness is what §6.2 measures the cost of.**
 
 A track code is a compressed list of placed parts. We implement an **encoder**
 as well as a decoder, validated three ways: every shipped track that decodes at
@@ -346,7 +374,8 @@ failure is always one steering input away.
 
 ## 6. Results
 
-> **STATUS: WRITTEN. One training seed throughout. Read §7 alongside.**
+> **STATUS: WRITTEN. Three seeds on the headline result, one seed on the long
+> run and on the single-track search. Read §7 alongside.**
 
 ### 6.1 Generalisation to unseen tracks
 
@@ -403,9 +432,79 @@ walls. The official tracks have all of those; the human record on one of them
 wall-rides at 400 km/h along vertical faces. So this row measures the distance
 between our generated distribution and human-designed levels, which is large,
 and not a failure to generalise within a distribution, which did not occur.
-Closing it is a generator problem rather than a learning one.
+Closing it is a generator problem rather than a learning one. §6.2 replaces
+that sentence, which was an inference, with a measurement.
 
-### 6.2 Search on a single official track
+### 6.2 The zero-shot gap, measured
+
+A claim of "distribution distance" is cheap, and distinguishing it from a
+learning failure requires measuring the distance in the space the policy
+actually consumes: its observation vector. We take the band between the 0.1st
+and 99.9th percentile of each of the 62 features, over the 24,545 frames the
+1.22 M-step policy generated while greedily driving its 48 training tracks, and
+count features outside that band elsewhere. Percentiles rather than extrema,
+because a single outlying frame in twenty-five thousand would otherwise widen a
+feature's band enough to swallow anything.
+
+| | frames with ≥ 1 feature outside | features outside, of 62 |
+|---|---|---|
+| **control**: 16 unseen *generated* tracks (16/16 finished) | **1 %** | **0.0–0.1** |
+| **test**: 4 official tracks (0/4 finished) | **57–62 %** | **7.0–9.2** |
+
+**The control carries the result.** An out-of-support count is uninterpretable
+alone: a band estimated too tightly produces one for every track, including
+those the policy drives perfectly. Tracks the policy has never seen but which
+come from the training distribution sit inside the band, so the band is not too
+tight, and the official tracks are **147–154× further outside it**. Ranges span
+two passes of the same measurement; greedy action selection is not
+deterministic under IQN, which resamples its quantile fractions each forward
+pass, so the measurement itself carries roughly ±15 %.
+
+**The observation is out of support at the first frame of all four official
+tracks** — arc 0.0 m, car stationary on the start line, before any action is
+taken. The failure is not a policy driving competently into progressively
+stranger geometry; it is a policy handed inputs unlike anything it trained on
+from the outset. Consistently, the track it got furthest on (23.5 % of the lap)
+is also the least out of distribution, at 1.4–1.7 features per frame against
+7.4–12.5 for the other three.
+
+**Isolating the reference-line confound.** 95 % of the violations fall on the
+lookahead features, and the lookahead points and lateral offset are measured
+*against the reference line* — which the two libraries obtain differently: a
+generated track's line is its own centreline, an official track's is derived
+from a human lap, and a racing line cuts corners. On its face, then, most of
+the effect is dismissible as racing-line-versus-centreline rather than
+road-versus-road. We test it by changing one variable: 12 tracks the policy
+trained on, driven again on the identical road with only the line swapped for
+one derived from a lap the policy itself drove, built exactly as every official
+track's line is.
+
+| line, same 12 roads | frames with ≥ 1 outside | features outside |
+|---|---|---|
+| centreline (as trained) | 1 % | **0.03** |
+| derived from a driven lap | 20 % | **0.77** |
+| *official tracks, for scale* | *62 %* | *9.2* |
+
+Line provenance is a real effect and a small one: **at most 8 %** of the
+official-track distance, leaving the road to account for the rest. Two features
+that cannot be confounded agree, since nothing about where a line runs makes a
+car roll or fall — vertical velocity reaches **4.4×** beyond the training band
+on official tracks and roll rate **10×**. Those are elevation and banking,
+which a flat grid of right-angle corners cannot express, and they name the
+features a wider generator should target first.
+
+A two-track pilot of this test reported 1 % and was wrong, because relining
+changes nothing on some roads and a great deal on others — two of the twelve
+reach 3.2 and 4.4 features per frame. We report the twelve-track figure.
+
+**What the measurement cannot see.** 12 of the 62 features are bounded and
+saturated in training — an airborne flag, four wheel-contact flags, and nine
+ray distances normalised into [0.083, 1] whose full range occurs in training —
+so they lie outside no band by construction, and the test is blind to them. Any
+distance it reports is therefore a lower bound on the true distributional
+distance.
+
+### 6.3 Search on a single official track
 
 All figures are gate-verified and confirmed by the client's own verifier.
 
@@ -468,15 +567,29 @@ constrains what any trajectory parameterisation can represent.
   times, which gives a spread on the headline figure. It does not vary
   anything else — one architecture, one reward, one set of hyperparameters —
   so nothing here is an ablation.
-- **The single-track search results are still n = 1.** §6.2 was not repeated.
+- **The single-track search results are still n = 1.** §6.3 was not repeated.
+- **The support measurement is descriptive, not causal.** §6.2 establishes that
+  the official-track observation lies far outside the training band and that
+  reference-line provenance does not explain it. It does not demonstrate that
+  the distance *causes* the failure: a policy could in principle be robust to
+  inputs outside its training support. The experiment that would close this is
+  a wider generator (§8.1), where reducing the measured distance should
+  recover performance if the mechanism is what we claim.
+- **12 of the 62 observation features cannot register a violation**, being
+  bounded and saturated in training, so every distance in §6.2 is a lower
+  bound.
+- **No transfer result.** That zero-shot fails says nothing either way about
+  whether the learned representation *helps* when fine-tuned on an official
+  track. That requires a matched from-scratch control and has not been run
+  (§8.5).
 - **No learned baseline.** The scripted driver is a floor, not a competitor.
   Nothing here is measured against Linesight, TMRL, GT Sophy or any standard
   RL algorithm on a common task.
 - **Par is a convention, not a standard.** On generated tracks it is the
   scripted driver's time halved, so `best/par` compares runs inside this paper
   and means nothing outside it.
-- **The generated distribution is narrow.** Five part types on flat ground, and
-  §6.1's zero-shot row measures what that costs.
+- **The generated distribution is narrow.** Five part types on flat ground;
+  §6.1's zero-shot row measures what that costs and §6.2 quantifies it.
 - **The three approaches on the official track** differ along several axes at
   once and are not a controlled comparison; two share an author, and the third
   was informed by the second's findings.
@@ -489,19 +602,33 @@ constrains what any trajectory parameterisation can represent.
 
 ## 8. Experiments still required
 
-> **STATUS: GAP. Nothing below has been run. No results exist for these.**
+> **STATUS: GAP, except where a subsection says otherwise. §8.2 is partly
+> done; nothing in §8.3–§8.6 has been run and no results exist for them.**
 
 ### 8.1 Widen the generated distribution
 
-Done for the core claim; see §6.1. What remains is the zero-shot gap. The
-generator uses five of 186 part types on flat ground, and the official tracks
-need jumps, banking, elevation and wall-rides. Each addition is a fresh
-geometry problem of the kind §4.1 describes, and the zero-shot row is the
-measurement that says whether it worked.
+The generator uses five of 186 part types on flat ground, and the official
+tracks need jumps, banking, elevation and wall-rides. Each addition is a fresh
+geometry problem of the kind §4.1 describes — and elevation in particular turns
+the self-avoiding walk from a 2-D problem into a 3-D one.
+
+§6.2 makes this both targeted and falsifiable, which it was not before. It
+names the two features furthest outside the training band that no confound
+explains — vertical velocity at 4.4× and roll rate at 10× — so elevation and
+banking come first. And it supplies the intermediate measurement: adding a part
+family should *reduce* the measured out-of-support distance on the official
+tracks, and that can be read off without training a policy to convergence
+first. If distance falls and zero-shot performance does not follow, the
+mechanism claimed in §6.2 is wrong, which is the outcome worth being able to
+detect.
 
 ### 8.2 Seeds and variance
 
-3–5 training seeds per configuration, with error bars on every reported figure.
+**Partly done.** §6.1's headline has three independent training seeds and
+carries a spread; §6.2's support measurement was run twice. The long 1.22 M-step
+run, every figure in §6.3, and the input-timing sensitivity results remain
+single samples. What is still wanted is 3–5 seeds on *each* configuration,
+including the search.
 
 ### 8.3 Baselines
 
@@ -514,7 +641,19 @@ on a common track would be stronger still.
 The observation's lookahead horizon; the action-space restriction; the search's
 ranking terms; control interval.
 
-### 8.5 Compute
+### 8.5 Does the representation transfer?
+
+The cheapest experiment that would convert §6.1's negative row into a positive
+claim, and it is not run. Fine-tune the generated-track policy on one official
+track against a from-scratch control, matched on every other axis, and compare
+time-to-first-completed-lap. "Zero-shot fails but pretraining cuts
+time-to-first-lap by *k*×" is a stronger and more useful statement than a clean
+zero-shot success would have been, and a null result is informative too. Cost
+is two runs of roughly seven hours each at the throughput in §8.6. Note the
+existing 801 k-step Winter 5 policy cannot serve as the control: it was trained
+with a restricted action space and so is not matched.
+
+### 8.6 Compute
 
 The binding constraint. At 50–80 transitions per second from six collectors on a
 laptop, tens of millions of transitions is days to weeks of wall-clock. The
@@ -529,10 +668,24 @@ GPU does not help, as the network is a small MLP.
 
 ### 9.1 What is released
 
-The environment, agent, search, generator and scripted driver, with **147
+The environment, agent, search, generator and scripted driver, with **158
 passing tests**, and every reported lap as an input recording that replays
-through the gate. `scripts/verify_baselines.py` re-verifies every figure in §6
-and hashes the inputs they were produced against.
+through the gate. `scripts/verify_baselines.py` re-verifies every lap time in
+§6.3 and hashes the inputs they were produced against.
+
+The §6.2 measurement ships as `scripts/measure_support.py` (the band, the
+control arm and the test) and `scripts/measure_line_confound.py` (the
+reference-line arm), with both passes' raw logs, the percentile band itself and
+the per-frame violation series under `arms/generalisation/support/`. The band
+is a reusable artifact: re-analysis against a saved band takes minutes, where
+re-deriving it costs 48 training laps.
+
+Two caveats on reproducing §6 exactly. Greedy evaluation is not deterministic
+under IQN, so finish rates and support distances reproduce to within a few per
+cent rather than exactly — which is why §6.2 quotes two independent passes.
+And the libraries the policies were trained and evaluated on embed the game's
+content, so they are rebuildable from a seed with the scripts here but are not
+themselves distributable (§9.2).
 
 ### 9.2 What cannot currently be released, and why it matters
 
@@ -622,6 +775,14 @@ silently.
    drift (currently zero everywhere).
 3. Generated track examples: a handful of layouts with their routes.
 4. **Generalisation curve** — finish rate on held-out tracks against training
-   transitions. *This figure does not exist and is the one the paper turns on.*
-5. Search ranking ablation on Winter 5.
-6. Input-timing sensitivity: distance reached against grid resolution (§6).
+   transitions. The data exists (`arms/generalisation/learning_curve.csv`, 121
+   points); the figure does not.
+5. **Out-of-support distance** (§6.2) — features outside the training band per
+   frame, against distance along the lap, one line per official track with the
+   control's 16 held-out tracks as a shaded band at the bottom. The per-frame
+   data is written per track by `scripts/measure_support.py`. This is the
+   figure that makes the zero-shot row a finding rather than a disclosure.
+6. **Violations by feature group**, control against official, with the
+   reference-line confound arm beside it (§6.2).
+7. Search ranking ablation on Winter 5.
+8. Input-timing sensitivity: distance reached against grid resolution (§6.3).
