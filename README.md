@@ -332,6 +332,52 @@ official tracks have all of those, and one of them is won by wall-riding at
 human-designed levels, not a failure to generalise within a distribution — which
 did not happen. Closing it is a generator problem, not a learning one.
 
+### That distance, measured
+
+`scripts/measure_support.py` turns the paragraph above from an inference into a
+number. Take the 0.1st–99.9th percentile band of each of the 62 observation
+features over the 24,545 frames the policy generated driving its 48 training
+tracks, then count features outside it elsewhere.
+
+| | frames with ≥1 feature outside | features outside, of 62 |
+|---|---|---|
+| **control** — 16 unseen *generated* tracks, 16/16 finished | **1%** | **0.0–0.1** |
+| **test** — 4 official tracks, 0/4 finished | **57–62%** | **7.0–9.2** |
+
+**The control is the whole measurement.** An out-of-support count alone is
+unfalsifiable: a band estimated too tightly produces one for every track,
+including the ones the policy drives perfectly. Tracks it has never seen but
+which come from its training distribution sit inside the band, so the band is
+informative, and the official tracks are **147–154× further outside it**. The
+range is two passes — greedy is not deterministic under IQN, so this carries
+about ±15%.
+
+**The observation is out of support at step 0 on all four**, stationary on the
+line before an action is taken. Not a policy driving competently into stranger
+and stranger geometry. The track it got furthest on is also the least out of
+distribution, at 1.4–1.7 features per frame.
+
+**95% of the violations are `lookahead`** — measured against the reference
+line, which a generated track takes from its own centreline and an official
+track from a human lap. A racing line cuts corners, so most of the effect was
+on its face dismissible as racing-line-versus-centreline.
+`scripts/measure_line_confound.py` re-drives 12 training roads with only the
+line's provenance swapped: 0.03 → 0.77 features per frame, so provenance
+accounts for **at most 8%** and the road for the rest. Two features that cannot
+be confounded agree, since nothing about where a line runs makes a car roll or
+fall — vertical velocity reaches **4.4×** beyond the band and roll rate
+**10×**. Elevation and banking, which a flat grid of right angles cannot build,
+and the features a wider generator should target first.
+
+Caveats worth carrying: **12 of the 62 features are bounded and saturated in
+training** — an airborne flag, four wheel-contact flags, nine normalised rays —
+so they can never register a violation and every distance is a lower bound. And
+a two-track pilot of the confound test said 1% and was wrong, because relining
+changes nothing on some roads and a great deal on others.
+
+Artifacts in `arms/generalisation/support/`. The band is reusable via `--band`,
+which turns re-analysis from 48 training laps into minutes.
+
 ## Where the car can be
 
 The last approximation in the world model, now closed. The observation's rays

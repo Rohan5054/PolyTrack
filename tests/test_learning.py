@@ -542,6 +542,58 @@ def test_the_cache_evicts_least_recently_used():
     assert cache.builds == builds + 1, "b was least recently used and should go"
 
 
+def test_loading_can_keep_the_weights_and_drop_the_optimiser():
+    """The transfer experiment needs one variable to move, not two.
+
+    A pretrained arm measured against a from-scratch control differs in its
+    weights, which is the point, and in Adam's moment estimates, which is not:
+    those set the effective step size over exactly the early steps that
+    "time to first completed lap" is made of. ``reset_optimiser`` separates
+    them. Resuming an interrupted run wants the moments kept, so the default
+    has to stay False -- a flag that silently discarded them would quietly
+    damage every resume in the project.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    agent = IQNAgent(IQNConfig(obs_dim=8, hidden=32))
+    batch = (
+        np.random.randn(8, 8).astype(np.float32),
+        np.random.randint(0, 9, 8).astype(np.int64),
+        np.random.rand(8).astype(np.float32),
+        np.random.randn(8, 8).astype(np.float32),
+        np.zeros(8, dtype=np.float32),
+        np.full(8, 0.999, dtype=np.float32),
+    )
+    agent.learn(batch, np.ones(8, dtype=np.float32))
+    weights = {k: v.clone() for k, v in agent.online.state_dict().items()}
+    moments = agent.optimiser.state_dict()["state"][0]["exp_avg"].clone()
+    assert moments.abs().sum() > 0, "the fixture never built any Adam state"
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "agent.pt"
+        agent.save(path)
+
+        kept = IQNAgent.load(path)
+        assert kept.optimiser.state_dict()["state"], "a plain resume lost Adam"
+        assert torch.equal(
+            kept.optimiser.state_dict()["state"][0]["exp_avg"], moments
+        ), "a plain resume changed the moment estimates"
+
+        fresh = IQNAgent.load(path, reset_optimiser=True)
+        assert not fresh.optimiser.state_dict()["state"], "the moments survived"
+        # The weights are the thing being transferred, so they must be intact,
+        # and the step count stays so the checkpoint's provenance is visible.
+        for key, value in fresh.online.state_dict().items():
+            assert torch.equal(value, weights[key]), f"{key} did not survive"
+        assert fresh.steps == agent.steps
+
+
 if __name__ == "__main__":
     import sys
     import traceback

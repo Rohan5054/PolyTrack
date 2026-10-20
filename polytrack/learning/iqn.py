@@ -382,11 +382,25 @@ class IQNAgent:
         )
 
     @classmethod
-    def load(cls, path, device: str = "cpu") -> "IQNAgent":
+    def load(
+        cls, path, device: str = "cpu", *, reset_optimiser: bool = False
+    ) -> "IQNAgent":
+        """Restore an agent from a checkpoint.
+
+        ``reset_optimiser`` keeps the weights and throws the optimiser state
+        away, which matters for exactly one question: whether a *representation*
+        transfers. Adam carries first and second moment estimates, so a resumed
+        run takes its first gradient steps with a different effective step size
+        from a fresh one -- and in a transfer experiment that is a second
+        variable moving alongside the weights, in precisely the early steps the
+        measurement is about. Resuming a run that was interrupted wants the
+        opposite, which is why this defaults to False.
+        """
         blob = torch.load(path, map_location=device, weights_only=False)
         agent = cls(_upgrade_config(blob["config"]), device=device)
         agent.online.load_state_dict(blob["online"])
         agent.target.load_state_dict(blob["target"])
-        agent.optimiser.load_state_dict(blob["optimiser"])
+        if not reset_optimiser:
+            agent.optimiser.load_state_dict(blob["optimiser"])
         agent.steps = blob["steps"]
         return agent

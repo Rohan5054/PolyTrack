@@ -33,7 +33,7 @@ python tests/test_trackcode.py  # 12 tests
 python tests/test_wasm.py       # 19 tests
 python tests/test_recording.py  # 14 tests
 python tests/test_reference.py  # 18 tests
-python tests/test_learning.py   # 23 tests
+python tests/test_learning.py   # 24 tests
 python tests/test_spline.py     #  6 tests
 python tests/test_generator.py  # 12 tests
 python tests/test_pursuit.py    #  8 tests
@@ -42,7 +42,7 @@ python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 158 pass. Four of the suites reach for files that are not in the repo and
+All 159 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -507,6 +507,61 @@ times; and the IQN training loop with parallel collectors.
    `--forward-only`.
 3. ~~**Policy-guided search**~~ — done. `BeamSearch(prior=..., top_k=...)` and
    `scripts/search_run.py`. See below.
+
+4. **Does the representation transfer?** — designed, not run, and the best
+   value per hour left on the list: it can add a claim, where the ablations can
+   only defend numbers that already exist. Fine-tune the generated-track policy
+   on one official track against a from-scratch control and compare gradient
+   steps to the first completed lap.
+
+   ```bash
+   python scripts/train.py --library tracks.npz --track "Summer 1" \
+       --workers 6 --max-steps 150000 --seed 1 --name xfer-scratch-1
+   python scripts/train.py --library tracks.npz --track "Summer 1" \
+       --workers 6 --max-steps 150000 --seed 1 --name xfer-pre-1 \
+       --resume runs/gen1/agent.pt --reset-optimiser
+   ```
+
+   **Neither input ships.** `tracks.npz` is gitignored because it embeds the
+   game's content and takes `build_library.py` and three minutes to rebuild.
+   `runs/gen1/agent.pt` is gitignored because `runs/` is, and that one is not
+   rebuildable in three minutes -- it is the 1.22M-step checkpoint, 28.5 hours
+   of training, and it exists on exactly one machine. It is also what
+   `measure_support.py` reads, so **the §6.2 measurement cannot currently be
+   reproduced by anyone else either**. The weights carry no game content, which
+   is the test the committed recordings pass, so committing it is a decision
+   worth taking deliberately rather than leaving to a gitignore rule written
+   for training scratch.
+
+   **Summer 1, not Winter 5.** The support measurement puts it least out of
+   distribution of the four (1.4-1.7 features per frame against 7.4-12.5) and
+   the policy already reaches 23.5% of it zero-shot, so there is a gradient to
+   climb. Winter 5 is where the single-track infrastructure lives and is the
+   worst choice on both counts; its 801k policy cannot be the control either,
+   being `--forward-only`.
+
+   Two confounds that are already handled, and it is worth knowing why rather
+   than rediscovering them: `--max-steps` is **relative** to the resumed step
+   count, so both arms get the same number of new steps; and epsilon is
+   **Ape-X fixed per worker**, not decayed over steps, so a resume explores
+   exactly as a fresh run does. A step-indexed schedule would have quietly
+   handed the pretrained arm a greedier policy at the moment of measurement.
+
+   The one that is not handled by default: a checkpoint carries **Adam's
+   moment estimates**, so a plain `--resume` differs from a fresh run in
+   weights *and* effective step size, over exactly the early steps the metric
+   is made of. `--reset-optimiser` keeps the weights and drops the moments,
+   which is the question §8.5 of PAPER.md actually asks. Do not make it the
+   default -- every interrupted run wants the moments kept, and
+   `test_loading_can_keep_the_weights_and_drop_the_optimiser` pins both halves.
+
+   Three seeds an arm. 150k steps is ~3.5 h, so the result is six runs and
+   ~21 h; a one-seed 50k pilot costs 2.5 h and says whether the effect is
+   worth the rest. Read all three outcomes as results: sooner is positive
+   transfer; no difference is consistent with the support measurement rather
+   than contradicting it, since features that far out of band may simply carry
+   no information; and *worse* is negative transfer, the most interesting of
+   the three, because it says the generated distribution actively misleads.
 
 The biggest available speed-up is sample efficiency, not throughput: episodes
 re-drive the first half of the track constantly. Linesight starts episodes from

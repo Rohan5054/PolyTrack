@@ -645,13 +645,43 @@ ranking terms; control interval.
 
 The cheapest experiment that would convert §6.1's negative row into a positive
 claim, and it is not run. Fine-tune the generated-track policy on one official
-track against a from-scratch control, matched on every other axis, and compare
-time-to-first-completed-lap. "Zero-shot fails but pretraining cuts
-time-to-first-lap by *k*×" is a stronger and more useful statement than a clean
-zero-shot success would have been, and a null result is informative too. Cost
-is two runs of roughly seven hours each at the throughput in §8.6. Note the
-existing 801 k-step Winter 5 policy cannot serve as the control: it was trained
-with a restricted action space and so is not matched.
+track against a from-scratch control matched on every other axis, and compare
+**gradient steps to the first completed lap**. "Zero-shot fails, but
+pretraining cuts time-to-first-lap by *k*×" is a more useful statement than a
+clean zero-shot success would have been, because it makes the generated
+distribution a usable curriculum rather than a dead end. A null result is
+informative and a negative one more so.
+
+**Summer 1 is the right track**, not Winter 5. §6.2 measures it as the least
+out of distribution of the four, 1.4–1.7 features per frame against 7.4–12.5;
+the policy already reaches 23.5 % of its lap zero-shot, so there is a gradient
+to climb rather than a cliff; and at 1301 m it is among the shortest. Winter 5,
+where all the single-track infrastructure lives, is the worst available choice
+on the first two counts, and its existing 801 k-step policy cannot serve as the
+control in any case, having been trained with a restricted action space.
+
+Two things are matched without any work, which is worth stating because both
+would otherwise be confounds. The training budget is relative to the resumed
+checkpoint's step count, so both arms take the same number of new gradient
+steps. And exploration follows Ape-X — each collector holds a fixed epsilon
+rather than decaying one over the run — so a resumed arm explores exactly as a
+fresh one does, where a step-indexed schedule would have handed the pretrained
+arm a quieter policy at the moment of measurement.
+
+One thing is not matched by default: a checkpoint carries Adam's moment
+estimates, so a resumed arm and a fresh one differ in weights *and* in
+effective step size, over precisely the early steps the metric is made of.
+The primary comparison should therefore load weights only
+(`train.py --reset-optimiser`), with carrying the optimiser state as a separate
+arm, since that is what a practitioner would do.
+
+Three seeds per arm. At the throughput in §8.6 a 150,000-step budget is about
+3.5 h, so the result is six runs and roughly 21 h; a single-seed pilot at
+50,000 steps costs 2.5 h and establishes whether the effect is large enough to
+be worth the rest. Secondary measures: steps to a sustained 50 % finish rate,
+final best lap time, and the shape of the failure histogram over time, where a
+`stalled` → `off_line` transition marks a policy that has learned to leave the
+line before it has learned to hold the track.
 
 ### 8.6 Compute
 
@@ -668,7 +698,7 @@ GPU does not help, as the network is a small MLP.
 
 ### 9.1 What is released
 
-The environment, agent, search, generator and scripted driver, with **158
+The environment, agent, search, generator and scripted driver, with **159
 passing tests**, and every reported lap as an input recording that replays
 through the gate. `scripts/verify_baselines.py` re-verifies every lap time in
 §6.3 and hashes the inputs they were produced against.

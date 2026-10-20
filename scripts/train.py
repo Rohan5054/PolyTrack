@@ -115,6 +115,14 @@ def parse_args(argv=None):
              "so repeats differ in a controlled, reproducible way",
     )
     parser.add_argument(
+        "--reset-optimiser", action="store_true",
+        help="with --resume, keep the weights and discard Adam's moment "
+             "estimates. For a transfer experiment: otherwise the pretrained "
+             "arm differs from its from-scratch control in two ways at once, "
+             "weights and effective step size, in exactly the early steps the "
+             "measurement is about. Leave it off to resume an interrupted run",
+    )
+    parser.add_argument(
         "--smoke", action="store_true",
         help="two workers, 90 seconds, tiny buffer -- proves the loop runs",
     )
@@ -160,7 +168,7 @@ def main(argv=None) -> int:
     elapsed_offset = 0.0
     resumed_best: dict[str, int] = {}
     if args.resume:
-        agent = IQNAgent.load(args.resume)
+        agent = IQNAgent.load(args.resume, reset_optimiser=args.reset_optimiser)
         # Carry the previous block's log forward so a run split across several
         # sittings still plots as one curve. gradient_steps is already
         # continuous because it lives on the agent; seconds would restart at
