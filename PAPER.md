@@ -660,20 +660,22 @@ where all the single-track infrastructure lives, is the worst available choice
 on the first two counts, and its existing 801 k-step policy cannot serve as the
 control in any case, having been trained with a restricted action space.
 
-Two things are matched without any work, which is worth stating because both
-would otherwise be confounds. The training budget is relative to the resumed
-checkpoint's step count, so both arms take the same number of new gradient
-steps. And exploration follows Ape-X — each collector holds a fixed epsilon
-rather than decaying one over the run — so a resumed arm explores exactly as a
-fresh one does, where a step-indexed schedule would have handed the pretrained
-arm a quieter policy at the moment of measurement.
+Two things are matched without any work. The training budget is relative to the
+resumed checkpoint's step count, so both arms take the same number of new
+gradient steps; and exploration follows Ape-X, each collector holding a fixed
+epsilon rather than decaying one over the run, so a resumed arm explores
+exactly as a fresh one does.
 
-One thing is not matched by default: a checkpoint carries Adam's moment
-estimates, so a resumed arm and a fresh one differ in weights *and* in
-effective step size, over precisely the early steps the metric is made of.
-The primary comparison should therefore load weights only
-(`train.py --reset-optimiser`), with carrying the optimiser state as a separate
-arm, since that is what a practitioner would do.
+Two are not, and both are differences in *early* training, which is where the
+metric lives. A checkpoint carries Adam's moment estimates, so weights and
+effective step size move together unless the optimiser is reset. And the
+prioritised replay anneals its importance-sampling exponent from 0.4 to 1 over
+500,000 learner steps keyed on the agent's step counter, so an arm resumed from
+a 1.22 M-step checkpoint samples at 1.0 from its first batch while a fresh arm
+starts at 0.4 and reaches only 0.58 by 150,000. Loading weights for a transfer
+comparison therefore means **online weights into both networks, a fresh
+optimiser, and the step counter at zero** — not merely weights plus a reset
+optimiser.
 
 Three seeds per arm. At the throughput in §8.6 a 150,000-step budget is about
 3.5 h, so the result is six runs and roughly 21 h; a single-seed pilot at
