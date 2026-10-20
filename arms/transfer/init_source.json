@@ -1,0 +1,8 @@
+{
+ "source": "/Users/vihaanc/Desktop/PolyTrack/PolyTrack/arms/generalisation/agent.pt",
+ "bytes": 2679709,
+ "mtime_ns": 1792497995107325051,
+ "lr": 5e-05,
+ "gamma": 0.99,
+ "pretrained_steps": 1220000
+}

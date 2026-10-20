@@ -1,0 +1,97 @@
+
+  xfer-pilot-scratch-0
+1 track(s)
+  Summer 1        1300.6 m  4 cp  par 23.805 s  (197 km/h avg)
+
+  6 collectors, batch 128, n-step 5, replay ratio 1.0
+  episode budget 3x par
+  actions: all 9
+  writing to runs/xfer-pilot-scratch-0
+
+     0.1 min |       0 steps (0/s) |   1,254 trans (250/s) | ratio 0.00 | loss       -- | lap   0.0 (greedy   0.0) | fin   0%     -- med /     -- fastest | 16 eps {'off_line': 16}
+     0.2 min |       0 steps (0/s) |   2,983 trans (345/s) | ratio 0.00 | loss       -- | lap   0.0 (greedy   0.0) | fin   0%     -- med /     -- fastest | 39 eps {'off_line': 39}
+     0.3 min |       0 steps (0/s) |   4,681 trans (339/s) | ratio 0.00 | loss       -- | lap   0.0 (greedy   0.0) | fin   0%     -- med /     -- fastest | 63 eps {'off_line': 63}
+     0.3 min |     448 steps (89/s) |   5,646 trans (191/s) | ratio 0.46 | loss   0.0003 | lap   0.0 (greedy   0.0) | fin   0%     -- med /     -- fastest | 86 eps {'off_line': 86}
+     0.4 min |   1,024 steps (111/s) |   6,613 trans (187/s) | ratio 0.60 | loss   0.0003 | lap   0.0 (greedy   0.0) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 99, 'stalled': 1}
+     0.5 min |   1,600 steps (114/s) |   7,586 trans (193/s) | ratio 0.59 | loss   0.0001 | lap   0.0 (greedy   0.0) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 84, 'stalled': 16}
+     0.6 min |   2,304 steps (134/s) |   8,757 trans (223/s) | ratio 0.60 | loss   0.0003 | lap   0.0 (greedy   0.0) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 69, 'stalled': 31}
+     0.7 min |   2,944 steps (124/s) |   9,825 trans (207/s) | ratio 0.60 | loss   0.0006 | lap 0.001 (greedy 0.001) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 52, 'stalled': 48}
+     0.8 min |   3,648 steps (136/s) |  11,004 trans (228/s) | ratio 0.60 | loss   0.0007 | lap 0.002 (greedy 0.002) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 35, 'stalled': 65}
+     0.9 min |   4,352 steps (136/s) |  12,174 trans (226/s) | ratio 0.60 | loss    0.001 | lap 0.002 (greedy 0.002) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 23, 'stalled': 77}
+     0.9 min |   5,056 steps (140/s) |  13,332 trans (231/s) | ratio 0.61 | loss   0.0012 | lap 0.003 (greedy 0.003) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 9, 'stalled': 91}
+     1.0 min |   5,824 steps (142/s) |  14,621 trans (239/s) | ratio 0.60 | loss   0.0013 | lap 0.003 (greedy 0.003) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.1 min |   6,592 steps (151/s) |  15,921 trans (255/s) | ratio 0.59 | loss   0.0017 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.2 min |   7,360 steps (140/s) |  17,200 trans (233/s) | ratio 0.60 | loss   0.0022 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.3 min |   8,064 steps (140/s) |  18,362 trans (231/s) | ratio 0.61 | loss   0.0022 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.4 min |   8,768 steps (140/s) |  19,536 trans (233/s) | ratio 0.60 | loss   0.0023 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.5 min |   9,472 steps (134/s) |  20,728 trans (227/s) | ratio 0.59 | loss   0.0024 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.5 min |  10,240 steps (146/s) |  22,033 trans (249/s) | ratio 0.59 | loss   0.0023 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.6 min |  11,008 steps (143/s) |  23,327 trans (240/s) | ratio 0.59 | loss   0.0021 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.7 min |  11,712 steps (139/s) |  24,509 trans (233/s) | ratio 0.60 | loss    0.002 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.8 min |  12,416 steps (140/s) |  25,689 trans (235/s) | ratio 0.60 | loss   0.0018 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     1.9 min |  13,120 steps (139/s) |  26,889 trans (237/s) | ratio 0.59 | loss   0.0017 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     2.0 min |  13,824 steps (140/s) |  28,085 trans (238/s) | ratio 0.59 | loss   0.0018 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     2.1 min |  14,528 steps (138/s) |  29,274 trans (234/s) | ratio 0.59 | loss   0.0016 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     2.1 min |  15,232 steps (134/s) |  30,448 trans (223/s) | ratio 0.60 | loss   0.0016 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     2.2 min |  15,936 steps (128/s) |  31,628 trans (214/s) | ratio 0.60 | loss   0.0016 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     2.3 min |  16,576 steps (120/s) |  32,690 trans (199/s) | ratio 0.60 | loss   0.0015 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     2.4 min |  17,216 steps (121/s) |  33,764 trans (203/s) | ratio 0.60 | loss   0.0015 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'stalled': 100}
+     2.5 min |  17,792 steps (114/s) |  34,743 trans (194/s) | ratio 0.59 | loss   0.0016 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 1, 'stalled': 99}
+     2.6 min |  18,432 steps (117/s) |  35,832 trans (199/s) | ratio 0.59 | loss   0.0014 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 1, 'stalled': 99}
+     2.7 min |  19,072 steps (118/s) |  36,908 trans (199/s) | ratio 0.59 | loss   0.0014 | lap 0.004 (greedy 0.004) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 1, 'stalled': 99}
+     2.8 min |  19,712 steps (122/s) |  37,962 trans (201/s) | ratio 0.61 | loss   0.0014 | lap 0.005 (greedy 0.005) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 2, 'stalled': 98}
+     2.9 min |  20,352 steps (119/s) |  39,023 trans (197/s) | ratio 0.60 | loss   0.0014 | lap 0.005 (greedy 0.005) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 2, 'stalled': 98}
+     2.9 min |  20,992 steps (123/s) |  40,091 trans (205/s) | ratio 0.60 | loss   0.0013 | lap 0.006 (greedy 0.006) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 2, 'stalled': 98}
+     3.0 min |  21,632 steps (122/s) |  41,184 trans (208/s) | ratio 0.59 | loss   0.0013 | lap 0.007 (greedy 0.007) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 5, 'stalled': 95}
+     3.1 min |  22,272 steps (123/s) |  42,237 trans (202/s) | ratio 0.61 | loss   0.0013 | lap 0.008 (greedy 0.008) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 8, 'stalled': 92}
+     3.2 min |  22,912 steps (122/s) |  43,327 trans (208/s) | ratio 0.59 | loss   0.0014 | lap 0.009 (greedy 0.009) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 18, 'stalled': 82}
+     3.3 min |  23,552 steps (122/s) |  44,381 trans (200/s) | ratio 0.61 | loss   0.0015 | lap 0.011 (greedy  0.01) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 25, 'stalled': 75}
+     3.4 min |  24,192 steps (122/s) |  45,457 trans (206/s) | ratio 0.59 | loss   0.0018 | lap 0.013 (greedy 0.014) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 31, 'stalled': 69}
+     3.5 min |  24,832 steps (122/s) |  46,523 trans (203/s) | ratio 0.60 | loss   0.0018 | lap 0.017 (greedy 0.019) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 35, 'stalled': 65}
+     3.6 min |  25,472 steps (123/s) |  47,590 trans (204/s) | ratio 0.60 | loss   0.0022 | lap 0.019 (greedy 0.021) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 34, 'stalled': 66}
+     3.6 min |  26,112 steps (122/s) |  48,669 trans (205/s) | ratio 0.59 | loss   0.0026 | lap 0.023 (greedy 0.024) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 35, 'stalled': 65}
+     3.7 min |  26,752 steps (122/s) |  49,722 trans (201/s) | ratio 0.61 | loss   0.0029 | lap 0.029 (greedy 0.029) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 36, 'stalled': 64}
+     3.8 min |  27,392 steps (122/s) |  50,820 trans (209/s) | ratio 0.58 | loss   0.0037 | lap 0.031 (greedy 0.034) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 36, 'stalled': 64}
+     3.9 min |  28,032 steps (123/s) |  51,892 trans (206/s) | ratio 0.60 | loss   0.0038 | lap 0.036 (greedy 0.035) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 38, 'stalled': 62}
+     4.0 min |  28,672 steps (122/s) |  52,991 trans (209/s) | ratio 0.58 | loss   0.0047 | lap 0.039 (greedy 0.039) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 36, 'stalled': 64}
+     4.1 min |  29,312 steps (122/s) |  54,059 trans (204/s) | ratio 0.60 | loss   0.0063 | lap 0.041 (greedy 0.042) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 34, 'stalled': 66}
+     4.2 min |  29,952 steps (121/s) |  55,128 trans (203/s) | ratio 0.60 | loss   0.0062 | lap 0.044 (greedy 0.047) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 29, 'stalled': 71}
+     4.3 min |  30,592 steps (122/s) |  56,196 trans (204/s) | ratio 0.60 | loss   0.0091 | lap 0.048 (greedy 0.051) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 23, 'stalled': 77}
+     4.3 min |  31,232 steps (123/s) |  57,279 trans (207/s) | ratio 0.59 | loss   0.0132 | lap 0.049 (greedy 0.054) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 19, 'stalled': 81}
+     4.4 min |  31,872 steps (123/s) |  58,344 trans (204/s) | ratio 0.60 | loss    0.013 | lap 0.053 (greedy 0.056) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 17, 'stalled': 83}
+     4.5 min |  32,512 steps (122/s) |  59,421 trans (206/s) | ratio 0.59 | loss   0.0228 | lap 0.056 (greedy 0.057) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 13, 'stalled': 87}
+     4.6 min |  33,152 steps (122/s) |  60,492 trans (205/s) | ratio 0.60 | loss   0.0256 | lap 0.056 (greedy 0.057) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 12, 'stalled': 88}
+     4.7 min |  33,792 steps (122/s) |  61,562 trans (205/s) | ratio 0.60 | loss   0.0261 | lap 0.056 (greedy 0.057) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 12, 'stalled': 88}
+     4.8 min |  34,432 steps (122/s) |  62,642 trans (206/s) | ratio 0.59 | loss   0.0315 | lap 0.054 (greedy 0.055) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 14, 'stalled': 86}
+     4.9 min |  35,072 steps (122/s) |  63,703 trans (203/s) | ratio 0.60 | loss   0.0357 | lap 0.052 (greedy 0.055) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 15, 'stalled': 85}
+     4.9 min |  35,712 steps (122/s) |  64,776 trans (205/s) | ratio 0.60 | loss   0.0409 | lap 0.061 (greedy 0.071) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 17, 'stalled': 83}
+     5.0 min |  36,352 steps (122/s) |  65,848 trans (205/s) | ratio 0.60 | loss   0.0505 | lap 0.068 (greedy 0.087) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 17, 'stalled': 83}
+     5.1 min |  36,992 steps (122/s) |  66,921 trans (205/s) | ratio 0.60 | loss   0.0499 | lap 0.069 (greedy 0.088) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 18, 'stalled': 82}
+     5.2 min |  37,632 steps (123/s) |  67,998 trans (207/s) | ratio 0.59 | loss   0.0593 | lap 0.069 (greedy 0.092) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 19, 'stalled': 81}
+     5.3 min |  38,272 steps (122/s) |  69,055 trans (202/s) | ratio 0.60 | loss   0.0722 | lap 0.074 (greedy 0.097) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 21, 'stalled': 79}
+     5.4 min |  38,912 steps (122/s) |  70,121 trans (204/s) | ratio 0.60 | loss   0.0691 | lap 0.081 (greedy 0.098) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 22, 'stalled': 78}
+     5.5 min |  39,552 steps (122/s) |  71,182 trans (203/s) | ratio 0.60 | loss   0.0827 | lap 0.089 (greedy 0.103) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 24, 'stalled': 76}
+     5.6 min |  40,192 steps (122/s) |  72,248 trans (203/s) | ratio 0.60 | loss   0.0937 | lap  0.09 (greedy 0.115) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 23, 'stalled': 77}
+     5.6 min |  40,832 steps (122/s) |  73,313 trans (203/s) | ratio 0.60 | loss   0.0908 | lap 0.098 (greedy 0.123) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 25, 'stalled': 75}
+     5.7 min |  41,472 steps (122/s) |  74,375 trans (202/s) | ratio 0.60 | loss   0.0996 | lap 0.106 (greedy 0.123) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 24, 'stalled': 76}
+     5.8 min |  42,112 steps (122/s) |  75,473 trans (209/s) | ratio 0.58 | loss   0.1056 | lap 0.108 (greedy 0.128) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 26, 'stalled': 74}
+     5.9 min |  42,752 steps (122/s) |  76,535 trans (202/s) | ratio 0.60 | loss   0.1216 | lap 0.111 (greedy 0.134) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 28, 'stalled': 72}
+     6.0 min |  43,392 steps (122/s) |  77,605 trans (204/s) | ratio 0.60 | loss    0.144 | lap 0.114 (greedy 0.152) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 33, 'stalled': 67}
+     6.1 min |  44,032 steps (122/s) |  78,678 trans (205/s) | ratio 0.60 | loss   0.1525 | lap 0.118 (greedy  0.15) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 37, 'stalled': 63}
+     6.2 min |  44,672 steps (122/s) |  79,728 trans (201/s) | ratio 0.61 | loss   0.1657 | lap 0.127 (greedy 0.153) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 38, 'stalled': 62}
+     6.3 min |  45,312 steps (122/s) |  80,779 trans (200/s) | ratio 0.61 | loss   0.1992 | lap  0.13 (greedy 0.148) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 40, 'stalled': 60}
+     6.3 min |  45,952 steps (122/s) |  81,863 trans (206/s) | ratio 0.59 | loss   0.1989 | lap 0.138 (greedy 0.153) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 41, 'stalled': 59}
+     6.4 min |  46,592 steps (122/s) |  82,938 trans (204/s) | ratio 0.59 | loss   0.2418 | lap 0.143 (greedy 0.149) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 42, 'stalled': 58}
+     6.5 min |  47,232 steps (122/s) |  83,983 trans (199/s) | ratio 0.61 | loss   0.2787 | lap 0.138 (greedy 0.149) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 42, 'stalled': 58}
+     6.6 min |  47,872 steps (122/s) |  85,026 trans (198/s) | ratio 0.61 | loss   0.2833 | lap 0.143 (greedy 0.145) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 41, 'stalled': 59}
+     6.7 min |  48,512 steps (122/s) |  86,079 trans (201/s) | ratio 0.61 | loss   0.3231 | lap 0.152 (greedy 0.149) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 41, 'stalled': 59}
+     6.8 min |  49,152 steps (122/s) |  87,153 trans (205/s) | ratio 0.60 | loss   0.3631 | lap 0.161 (greedy 0.155) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 42, 'stalled': 58}
+     6.9 min |  49,792 steps (122/s) |  88,213 trans (202/s) | ratio 0.60 | loss   0.3765 | lap 0.168 (greedy 0.162) | fin   0%     -- med /     -- fastest | 100 eps {'off_line': 39, 'stalled': 61}
+
+  this block: 88,631 transitions in 7.9 min (186.9/s)
+  total: 50,048 gradient steps over 8 min
+  0 finish(es)
+
+  continue with:
+    python scripts/train.py --workers 6 --resume runs/xfer-pilot-scratch-0/agent.pt
+

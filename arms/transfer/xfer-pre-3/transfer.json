@@ -1,0 +1,32 @@
+{
+ "arm": "pretrained",
+ "seed": 3,
+ "phase": "result",
+ "budget": 150000,
+ "command": [
+  "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+  "-u",
+  "/Users/vihaanc/Desktop/PolyTrack/PolyTrack/scripts/train.py",
+  "--library",
+  "/Users/vihaanc/Desktop/PolyTrack/PolyTrack/tracks.npz",
+  "--track",
+  "Summer 1",
+  "--workers",
+  "6",
+  "--max-steps",
+  "150000",
+  "--seed",
+  "3",
+  "--name",
+  "xfer-pre-3",
+  "--lr",
+  "5e-05",
+  "--gamma",
+  "0.99",
+  "--log-every",
+  "5",
+  "--resume",
+  "/Users/vihaanc/Desktop/PolyTrack/PolyTrack/runs/xfer-init/agent.pt"
+ ],
+ "started": "2026-10-20 20:50:51"
+}
