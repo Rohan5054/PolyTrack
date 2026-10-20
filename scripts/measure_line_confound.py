@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Separate "unfamiliar road" from "unfamiliar reference line".
 
-    python scripts/measure_line_confound.py runs/gen1/agent.pt \
-        --band runs/support/support_band.csv
+    python scripts/measure_line_confound.py
 
 `measure_support.py` finds official tracks 147x further outside the training
 distribution than unseen generated ones, and **95% of those violations are
@@ -46,12 +45,12 @@ from measure_support import feature_names, groups, rollout
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", type=Path, nargs="?",
-                        default=Path("runs/gen1/agent.pt"))
+                        default=Path("arms/generalisation/agent.pt"))
     parser.add_argument("--band", type=Path,
-                        default=Path("runs/support/support_band.csv"))
+                        default=Path("arms/generalisation/support/support_band.csv"))
     parser.add_argument("--library", type=Path,
                         default=Path("tracks_generated.npz"))
-    parser.add_argument("--laps", type=Path, default=Path("runs/gen1"),
+    parser.add_argument("--laps", type=Path, default=Path("arms/generalisation/laps"),
                         help="directory of best_generated_<i>.json laps")
     parser.add_argument("--tracks", type=int, default=12)
     parser.add_argument("--attempts", type=int, default=3)

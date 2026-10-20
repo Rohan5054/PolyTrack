@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure where an official-track observation leaves the training distribution.
 
-    python scripts/measure_support.py runs/gen1/agent.pt
+    python scripts/measure_support.py
 
 `arms/generalisation/README.md` reports 0 of 4 official tracks and explains it
 as distribution distance. That explanation is an inference, and this turns it
@@ -72,7 +72,7 @@ def groups() -> dict[str, slice]:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", type=Path, nargs="?",
-                        default=Path("runs/gen1/agent.pt"))
+                        default=Path("arms/generalisation/agent.pt"))
     parser.add_argument("--train-library", type=Path,
                         default=Path("tracks_generated.npz"))
     parser.add_argument("--official-library", type=Path, default=Path("tracks.npz"))

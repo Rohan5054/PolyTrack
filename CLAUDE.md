@@ -522,16 +522,25 @@ times; and the IQN training loop with parallel collectors.
        --resume runs/gen1/agent.pt --reset-optimiser
    ```
 
-   **Neither input ships.** `tracks.npz` is gitignored because it embeds the
-   game's content and takes `build_library.py` and three minutes to rebuild.
-   `runs/gen1/agent.pt` is gitignored because `runs/` is, and that one is not
-   rebuildable in three minutes -- it is the 1.22M-step checkpoint, 28.5 hours
-   of training, and it exists on exactly one machine. It is also what
-   `measure_support.py` reads, so **the §6.2 measurement cannot currently be
-   reproduced by anyone else either**. The weights carry no game content, which
-   is the test the committed recordings pass, so committing it is a decision
-   worth taking deliberately rather than leaving to a gitignore rule written
-   for training scratch.
+   `tracks.npz` does not ship -- it embeds the game's content, and
+   `build_library.py` rebuilds it in three minutes. **The checkpoint does
+   ship**, at `arms/generalisation/agent.pt`, and the command above reads the
+   same weights from `runs/gen1/` only because that is where training wrote
+   them.
+
+   That was a deliberate decision and worth recording, because `runs/` is
+   gitignored and a 1.22M-step checkpoint is 28.5 hours on one machine: without
+   it neither the transfer experiment's pretrained arm nor the §6.2
+   measurement could be reproduced by anyone else. The test it has to pass is
+   the one the committed recordings pass -- **carries no game content** -- and
+   it does: 20 weight tensors for a 62->256->256->9 MLP, Adam state, an
+   `IQNConfig` of hyperparameters, a step count. No track codes, no geometry,
+   no reference lines. 2.6 MB. The 48 laps the policy drove on its training
+   tracks ship beside it in `arms/generalisation/laps/` for the same reason,
+   171 KB, since `measure_line_confound.py` needs them to build a relined
+   twin. Git cannot un-ignore a path under an ignored directory, so these are
+   copies in `arms/` rather than exceptions to `runs/` -- which is also where
+   `arms/README.md` says version-controlled artifacts belong.
 
    **Summer 1, not Winter 5.** The support measurement puts it least out of
    distribution of the four (1.4-1.7 features per frame against 7.4-12.5) and

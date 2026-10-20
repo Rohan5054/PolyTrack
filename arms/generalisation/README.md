@@ -164,6 +164,31 @@ itself, reusable via `--band` so re-analysis costs minutes rather than the 30
 the 48 training laps take), `groups_*.csv`, `line_confound.log` and
 `line_confound.csv`.
 
+## The policy, and the laps it drove
+
+`agent.pt` is the 1.22M-step checkpoint behind every figure in the long-run
+table and all of the support measurement. `laps/` holds the 48 best laps it
+drove on its training tracks, which is what `measure_line_confound.py` relines
+to build each road's twin.
+
+Both are committed, unlike everything in `runs/`, because a checkpoint is 28.5
+hours of compute on one machine and without it none of this reproduces. They
+pass the test the lap recordings pass -- **no game content**: 20 weight tensors
+for a 62->256->256->9 MLP, Adam state, an `IQNConfig` of hyperparameters and a
+step count, with no track codes, geometry or reference lines anywhere in it.
+
+Both measurement scripts default to these paths, so from a clone:
+
+```bash
+python scripts/measure_support.py          # needs tracks*.npz + geometry.npz
+python scripts/measure_line_confound.py    # reuses the committed band
+```
+
+Still missing for a stranger: `geometry.npz` and the three `tracks*.npz`
+libraries, which embed the game's content and are rebuildable with
+`tools/capture_geometry.py`, `scripts/build_library.py` and
+`scripts/build_generated_library.py`.
+
 ## Setup
 
 * **Policy**: IQN, 1,220,000 gradient steps over 28.5 hours, six collectors,

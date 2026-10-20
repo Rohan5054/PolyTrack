@@ -710,6 +710,16 @@ the per-frame violation series under `arms/generalisation/support/`. The band
 is a reusable artifact: re-analysis against a saved band takes minutes, where
 re-deriving it costs 48 training laps.
 
+**The policy itself is released**, at `arms/generalisation/agent.pt` — the
+1.22 M-step checkpoint every figure in §6.1's second table and all of §6.2 was
+produced from, with the 48 laps it drove on its training tracks beside it. A
+checkpoint is 28.5 hours of compute on one machine, so without it the
+measurement would be described rather than reproducible. It contains 20 weight
+tensors, Adam state, hyperparameters and a step count, and no part of the
+game's content — the same test the released input recordings meet (§9.2). Both
+measurement scripts default to it, so §6.2 reproduces from a clone plus the
+two files §9.2 explains we cannot ship.
+
 Two caveats on reproducing §6 exactly. Greedy evaluation is not deterministic
 under IQN, so finish rates and support distances reproduce to within a few per
 cent rather than exactly — which is why §6.2 quotes two independent passes.
