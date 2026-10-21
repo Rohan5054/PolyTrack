@@ -549,20 +549,35 @@ times; and the IQN training loop with parallel collectors.
    worst choice on both counts; its 801k policy cannot be the control either,
    being `--forward-only`.
 
-   Two confounds that are already handled, and it is worth knowing why rather
-   than rediscovering them: `--max-steps` is **relative** to the resumed step
+   Two confounds are handled: `--max-steps` is **relative** to the resumed step
    count, so both arms get the same number of new steps; and epsilon is
    **Ape-X fixed per worker**, not decayed over steps, so a resume explores
-   exactly as a fresh run does. A step-indexed schedule would have quietly
-   handed the pretrained arm a greedier policy at the moment of measurement.
+   exactly as a fresh run does.
 
-   The one that is not handled by default: a checkpoint carries **Adam's
-   moment estimates**, so a plain `--resume` differs from a fresh run in
-   weights *and* effective step size, over exactly the early steps the metric
-   is made of. `--reset-optimiser` keeps the weights and drops the moments,
-   which is the question §8.5 of PAPER.md actually asks. Do not make it the
-   default -- every interrupted run wants the moments kept, and
-   `test_loading_can_keep_the_weights_and_drop_the_optimiser` pins both halves.
+   **Two are not, and `--reset-optimiser` alone covers only one of them.** A
+   checkpoint carries **Adam's moment estimates**, so a plain `--resume`
+   differs from a fresh run in weights *and* effective step size over exactly
+   the early steps the metric is made of; `--reset-optimiser` drops the
+   moments. Do not make it the default -- every interrupted run wants them
+   kept, and `test_loading_can_keep_the_weights_and_drop_the_optimiser` pins
+   both halves.
+
+   But it **keeps the step counter**, and the counter drives a schedule. The
+   prioritised replay anneals its importance-sampling exponent from 0.4 to 1
+   over 500k learner steps (`replay.py`, `beta_steps`), keyed on `agent.steps`
+   via `replay.sample(batch, agent.steps)` in `train.py`. A run resumed from
+   the 1.22M-step checkpoint therefore samples at beta = 1.0 from its first
+   batch while a fresh run starts at 0.4 and reaches only 0.58 by 150k. That is
+   the same class of early-training difference the flag exists to remove, and
+   an earlier version of this file claimed no step-indexed schedule was in
+   play. **It was wrong**; checking that epsilon is fixed per worker is not the
+   same as checking that nothing is keyed on the step count.
+
+   Weights-only loading therefore has to zero the counter too -- online weights
+   into both networks, fresh optimiser, `steps = 0`. `scripts/transfer_experiment.py`
+   on the `transfer-summer1` branch does this by writing its own init
+   checkpoint, which is why the Summer 1 runs are unaffected; the flag itself
+   still needs fixing. See `PAPER_PLAN.md` §2.2 on that branch.
 
    Three seeds an arm. 150k steps is ~3.5 h, so the result is six runs and
    ~21 h; a one-seed 50k pilot costs 2.5 h and says whether the effect is
