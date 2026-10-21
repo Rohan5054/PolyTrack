@@ -7,6 +7,13 @@
 > `PAPER_PLAN.md` is not on `main` yet. Read it there first — the Summer 1
 > results in `arms/transfer/README.md` are the evidence this plan assumes.
 
+> **Revised 21 October 2026**, after comparing the Summer 1 budget against
+> `learning_curve.csv`. §0 is new and reorders everything: the Summer 1 runs
+> were stopped inside the region where the generated-track policy had not
+> learned to finish either, so they cannot yet choose between the options in
+> §0b. A 2.5-hour experiment does. §2's order changed, three cuts in §3 became
+> conditional, and the discount stopped being a tidy-up.
+
 ## The argument in one paragraph
 
 The environment, the three-seed generalisation result, the support measurement
@@ -17,11 +24,70 @@ weeks full-time**, or 2½–4 months of evenings. The version below is **about t
 days, plus one lap played**, and it spends that time on the one open item that
 could *subtract* from what already exists.
 
-## 0. Three options, not two
+## 0. First, two and a half hours that decide which plan to run
 
-The cut below optimises for submitting what exists. That is an assumption about
-the goal, not a conclusion from the evidence, and it should be stated plainly
-because changing it changes which cuts are justified.
+**The Summer 1 runs were stopped at a budget the project's own learning curve
+says is too short, so they cannot yet distinguish between three multi-week
+paths.** `arms/generalisation/learning_curve.csv`, on the generated tracks:
+
+| gradient steps | finish rate | greedy fraction |
+|---|---|---|
+| 49k | 3 % | 0.30 |
+| 73k | 19 % | 0.47 |
+| **85k** | 33 % | **0.67** |
+| 142k | 55 % | 0.93 |
+| **155k** | **70 %** | **1.00** |
+
+Summer 1 at 150k steps reached a greedy fraction of **0.49** (0.37-0.72) with no
+finishes — roughly where the generated-track policy sat at **85k**, and far
+behind the complete laps it was driving by 155k. The generated figures pool 48
+tracks including short ones, so `greedy_fraction` is the fairer column; it is
+also the one showing the larger gap. A 23.8-second track with a 47 m descent and
+two jumps producing no finishes by 150k is what that curve predicts.
+
+`PAPER_PLAN.md` §1 concedes the budget point — "the first-lap metric needs a
+much larger budget" — and then reports the run as "a weak or null transfer
+result, consistent with §6.2". **That is over-reading it.** If both arms were
+stopped before either could plausibly finish, the honest label is
+*inconclusive at this budget*, not weak transfer. The one result that survives
+is the early dip: all four pretrained runs start at 22 %, fall to 13-18 % by
+25k, and recover. That is a real finding about unlearning and does not depend on
+the budget.
+
+Worse, **budget is confounded with the discount**. §1 below confirms every run
+ever done used gamma = 0.99, a 5-second horizon at a 50 ms control interval. At
+the second jump, where 33 of 80 attempts died, the remaining 7.6 s of lap is
+discounted to **0.216** of face value while slowing costs progress reward
+immediately at 1.000; at gamma = 0.999 the same remainder is worth 0.859. And
+since no episode ever finished, the `par / elapsed` finish bonus — the project's
+only reward for finishing rather than progressing — **was never once in the
+replay buffer**. A policy optimising progress rate under a 5-second horizon
+carries maximum speed into everything, and a jump is precisely the feature that
+punishes that.
+
+Nothing in the Summer 1 data separates "horizon too short to value surviving the
+jump" from "stopped before it learned the jump".
+
+**The separator: two scratch runs on Summer 1 at 500k steps, gamma 0.99 against
+gamma 0.999, nothing else varied.** About 70 minutes each on the M5, 2.5 hours
+in total.
+
+| outcome | what it means | what to do |
+|---|---|---|
+| both finish | it was budget | rerun the transfer experiment at a real budget before claiming anything from it; gamma is a tidy-up |
+| only 0.999 finishes | horizon | a finding worth a paragraph, and gamma stops being a tidy-up |
+| neither finishes at 500k | the jumps themselves | §3.2 or §2.3 earns its two weeks, and §6.2's mechanism is on firmer ground |
+
+Two and a half hours to learn which of three multi-week paths is the right one.
+**This comes before anything in §3 of either document**, and before committing
+to any option in the table below.
+
+## 0b. Three options, not two
+
+Which of these is right depends on §0's outcome. The cut below otherwise
+optimises for submitting what exists — an assumption about the goal, not a
+conclusion from the evidence, and one that should be stated plainly because
+changing it changes which cuts are justified.
 
 **One cut item could change what the paper claims. Everything else is rigour.**
 
@@ -87,6 +153,13 @@ play; that was concluded from epsilon being Ape-X fixed-per-worker, which does
 not follow. Corrected in `bc5e8c5`. The `--reset-optimiser` flag keeps the
 counter, so weights-only loading still needs fixing in code.
 
+**The 150k budget — checked against the project's own curve.** The table in §0
+is read from `arms/generalisation/learning_curve.csv`, which is committed, and
+from the per-run columns in `arms/transfer/*/history.json`. The comparison is
+not exact — one is 48 pooled tracks, the other is one harder track — and it does
+not need to be to make the point that 150k is inside the region where the
+generated-track policy had not learned to finish either.
+
 **§7.3, the 18.809 — not in this repository.** `records.json` holds eight
 entries. Winter 5 (`2fe4bd46…`) has **19025 and 21899, and nothing else**; no
 entry anywhere in the file is 18809. Whatever holds that lap is on the machine
@@ -98,16 +171,21 @@ outputs, and an 18.809 would sit naturally in that series.
 
 | | what | cost |
 |---|---|---|
-| 1 | **Resolve the 18.809.** | ~1 h |
-| 2 | **Email Kodub about redistribution** (`PAPER_PLAN.md` §4). | today |
-| 3 | §2.1 gamma fix, and state the discount in PAPER.md. | ~1 h |
-| 4 | §2.2 weights-only loading, with a test. | ~1 h |
-| 5 | `PYTHONPATH` note in the README. | 5 min |
-| 6 | M5 cost figures into PAPER.md §3.6/§8.6. | one sentence |
-| 7 | **Winter 1**: play a lap, measure support distance, evaluate zero-shot. | ~2 h |
-| 8 | *Optional:* §3.1 on Desert 3 only. | ~1 day |
+| 1 | **Email Kodub about redistribution** (`PAPER_PLAN.md` §4). | today |
+| 2 | **Resolve the 18.809.** | ~1 h |
+| 3 | §2.1 gamma fix — now a prerequisite for item 4, not a tidy-up. | ~1 h |
+| 4 | **The gamma/budget separator** (§0): two scratch runs, 500k, 0.99 vs 0.999. | ~2.5 h |
+| 5 | §2.2 weights-only loading, with a test. | ~1 h |
+| 6 | `PYTHONPATH` note in the README. | 5 min |
+| 7 | M5 cost figures into PAPER.md §3.6/§8.6. | one sentence |
+| 8 | **Winter 1**: play a lap, measure support distance, evaluate zero-shot. | ~2 h |
+| 9 | Relabel the Summer 1 result per §0. | ~15 min |
+| 10 | *Optional, and read item 4 first:* §3.1 on Desert 3 only. | ~1 day |
 
-### 2.1 Resolve the 18.809 first
+Items 1-3 are unconditional. **Item 4 decides whether the rest of this document
+is the right plan**, so do not start item 8 or 10 before reading it.
+
+### 2.1 Resolve the 18.809
 
 It is the only open item that can reduce a claim the paper already makes. If an
 18.809 human lap on Winter 5 exists, the headline margin falls from **239 ms to
@@ -145,13 +223,40 @@ collectors' n-step discount comes from `agent.config.gamma` rather than
 learner bootstraps at 0.99 — the exact disagreement the comment below that line
 forbids.
 
-**Do not retrain §6.1.** Treat 0.99 as the shipped configuration, state it in
-the paper, and leave 0.999 as a future ablation. Rebuilding the headline
-invalidates comparability with everything banked — including §6.2's support
-band, which is a property of one specific policy — for a hypothesis nobody has
-tested. If 0.999 later proves clearly better, rerun then and report both.
+**Do not retrain §6.1 on the strength of the fix alone.** Treat 0.99 as the
+shipped configuration for the generalisation results and state it in the paper.
+Rebuilding the headline invalidates comparability with everything banked —
+including §6.2's support band, which is a property of one specific policy — for
+a hypothesis nobody has tested.
 
-### 2.4 Winter 1 instead of elevation in the generator
+§0 is what tests it. An earlier draft of this document filed gamma as a
+correctness tidy-up that "defends numbers you already have". That was wrong:
+applied to a 24-second track with jumps, a 5-second horizon is a candidate root
+cause for the whole 0/4, which makes the fix a prerequisite for item 4 rather
+than housekeeping. If 0.999 turns out to matter there, retraining §6.1 becomes
+a real question — and §0's first outcome is the one that keeps it closed.
+
+### 2.4 The separator, pre-specified
+
+Fix this before running it, per §5.
+
+* **Runs:** two, both `scratch` on Summer 1 from `tracks.npz`, 500,000 gradient
+  steps, six collectors, all nine actions, seed 1 for both. One at
+  `--gamma 0.99`, one at `--gamma 0.999`. No pretrained arm — this is about the
+  track, not transfer.
+* **Primary:** gradient steps to the first completed lap by any collector,
+  and the greedy fraction at 150k / 300k / 500k.
+* **Censored fallback, named in advance:** steps to reach 25 / 50 / 75 % of the
+  lap, and the furthest fraction reached in ten greedy attempts from the final
+  checkpoint, using `arms/transfer/where_attempts_end.py` so the section
+  breakdown is comparable with the runs already banked.
+* **Report both runs whatever happens**, and record that the 0.999 run is the
+  first in the project to use the discount the code was designed for.
+* One seed is deliberate: this is a triage experiment to choose a path, not a
+  result for the paper. If it changes the plan, the version that goes in the
+  paper gets three seeds.
+
+### 2.5 Winter 1 instead of elevation in the generator
 
 `PAPER_PLAN.md` §3.2 proposes adding ramps and jumps to the generator, which
 turns the self-avoiding walk into a 3-D problem, needs the scripted driver to
@@ -181,7 +286,7 @@ This is weaker evidence than §3.2 — a correlation over five tracks, not a
 manipulation — and the write-up must say so. It costs about 1 % as much, and a
 positive result is the thing that would justify building elevation later.
 
-### 2.5 Desert 3, if there is appetite for one more headline
+### 2.6 Desert 3, if there is appetite for one more headline
 
 `PAPER_PLAN.md` §3.1 budgets five tracks, three seeds each and ~40 h, and it is
 costed as though each track needs a policy that can complete a lap. **It does
@@ -200,11 +305,14 @@ Every reported lap goes through `scripts/run_gate.py` **and**
 
 ## 3. Cut, with the reason
 
+Three of these are **conditional on §0** and are marked so. The rest are cut
+whatever it returns.
+
 | cut | why |
 |---|---|
-| **§2.3** start episodes along the track | 2–3 days and the only change here that touches reward and progress semantics: `ProgressTracker` initialised mid-lap, par rescaled for the finish bonus, recordings exported only from start-line episodes, an LRU over 24 MB states. CLAUDE.md then requires a search run against the changed reward, since beam search found both previous progress bugs in seconds. It accelerates training; no claim in the paper depends on it. |
-| **§3.3** transfer across tracks | ~60 h — the plan says run it twice and the order table counts it once. Summer 1 already gives the weak/null result and §6.2 explains it. A dose-response curve is a nice-to-have. |
-| **§3.2** elevation in the generator | 1–2 weeks, open-ended. Replaced by §2.4 above. |
+| **§2.3** start episodes along the track — *conditional* | 2–3 days and the only change here that touches reward and progress semantics: `ProgressTracker` initialised mid-lap, par rescaled for the finish bonus, recordings exported only from start-line episodes, an LRU over 24 MB states. CLAUDE.md then requires a search run against the changed reward, since beam search found both previous progress bugs in seconds. **If §0 returns "neither finishes at 500k", this comes back** — at that point sample efficiency is the binding constraint rather than a convenience. |
+| **§3.3** transfer across tracks — *conditional* | ~60 h, and the plan says run it twice while its order table counts it once. **But the Summer 1 run no longer supports a transfer claim at all** (§0), so if a transfer result is wanted, something has to be rerun at a real budget. Rerunning Summer 1 alone at 500k is 2 arms x 3 seeds x ~70 min, about 7 h — a tenth of the four-track sweep and enough for the claim §8.5 asks about. The four-track version stays cut. |
+| **§3.2** elevation in the generator — *conditional* | 1–2 weeks, open-ended. Replaced by §2.5 below **unless §0 returns "neither finishes at 500k"**, which is the outcome that makes the jumps themselves the obstacle and earns this its weeks. |
 | **§3.1** beyond one extra track | Five tracks is not five times more convincing for an environment paper, and each new track needs a lap played and raises the human-baseline question again. |
 | **§4** PPO or DQN baseline | "Reviewers expect two algorithms" holds for an algorithms paper. This is an environment paper. Expect it as the likeliest reviewer complaint and answer it in §7 rather than running it. |
 | **§4** ablations | Lookahead horizon, action restriction, control interval. They defend numbers that already exist; none adds a claim. |
@@ -213,7 +321,11 @@ Every reported lap goes through `scripts/run_gate.py` **and**
 
 ## 4. Answers to `PAPER_PLAN.md` §7
 
-1. **Discount.** Keep 0.99, state it, do not retrain. See §2.3 above.
+1. **Discount.** Keep 0.99 for the banked generalisation results and state it in
+   the paper either way. Whether to retrain anything at 0.999 is not a judgement
+   call — §0 answers it for 2.5 hours, and it should be answered before the
+   question is argued. Fix the flag regardless (§2.3): a default the code's own
+   comment argues against is a trap for whoever trains next.
 2. **Tracks.** Winter 1 for the support test, because flat is the whole point of
    choosing it. Desert 3 for the optional second headline, because it already
    has a human lap. Nobody needs to play anything except Winter 1.
@@ -235,9 +347,14 @@ Every reported lap goes through `scripts/run_gate.py` **and**
 
 * **Decide before running.** Tracks, metrics including the censored ones,
   budgets and seeds fixed and written into PAPER.md §8 before the first run.
-  §2.4 above does this for the Winter 1 test.
-* **Report everything that ran**, Summer 1 included. A result a reviewer can see
-  was not selected is worth more than a cleaner one they cannot.
+  §2.4 and §2.5 above do this, for the separator and the Winter 1 test.
+* **Report everything that ran**, Summer 1 included — and report it as what it
+  is. §0 is the worked example: the run is sound, the write-up in
+  `arms/transfer/README.md` is careful about its censored metric, and
+  `PAPER_PLAN.md` §1 still rounds it up to "a weak or null transfer result,
+  consistent with §6.2". The slide from "we could not measure it" to "we
+  measured something small" happens between a results file and the plan that
+  cites it, which is where to watch for it.
 * **Keep diagnoses honest.** "Attempts end on Summer 1's descents and jumps" is
   an observation; "because the generator has no elevation" is a hypothesis, and
   it cannot be the whole story — the scratch policies never saw a generated
@@ -246,19 +363,25 @@ Every reported lap goes through `scripts/run_gate.py` **and**
 
 ## 6. What this plan does not do
 
-* It does not produce zero-shot laps on an official track. That needs §3.2 or
-  §2.3, and both are cut.
+* It does not produce zero-shot laps on an official track, unless §0 returns the
+  second outcome and the discount turns out to have been the obstacle.
 * It does not add a second algorithm, so the paper claims nothing comparative
   about IQN.
-* It leaves the discount at the value the code argues against, documented rather
-  than fixed in the results.
+* It leaves the banked results trained at a discount the code's own comment
+  argues against. §2.3 fixes the flag and §0 measures what it cost; neither
+  retrains §6.1.
+* It produces no transfer claim. The Summer 1 runs cannot support one (§0), and
+  the ~7 h rerun that could is listed as conditional in §3 rather than
+  scheduled.
 * The Winter 1 test is correlational. If a reviewer wants the intervention,
   §3.2 is the answer and it is a week or two away, not an afternoon.
 
-Each of those is a sentence in §7 of PAPER.md rather than a gap in the
-argument — which is the test this cut was made against.
+Most of those are a sentence in §7 of PAPER.md rather than a gap in the
+argument, which is the test this cut was made against.
 
-The exception is the first one, and §0 is where it is argued: a zero-shot lap on
-an official track is not a sentence in §7, it is a result the paper does not
-have. If that result is wanted, §2.3 and §3.2 come back and the budget is two to
-three weeks rather than two days. Nothing else does.
+Two are not. A zero-shot lap on an official track is a result the paper does not
+have rather than a limitation it can disclose — §0b is where that is argued, and
+if it is wanted, §2.3 and §3.2 come back at two to three weeks. And the
+transfer claim §8.5 was written to answer is now unmeasured rather than
+measured-and-null, which is a weaker position than the paper currently implies
+and should be fixed in §8.5's text whether or not the rerun happens.
