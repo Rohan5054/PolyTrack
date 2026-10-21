@@ -17,6 +17,53 @@ weeks full-time**, or 2½–4 months of evenings. The version below is **about t
 days, plus one lap played**, and it spends that time on the one open item that
 could *subtract* from what already exists.
 
+## 0. Three options, not two
+
+The cut below optimises for submitting what exists. That is an assumption about
+the goal, not a conclusion from the evidence, and it should be stated plainly
+because changing it changes which cuts are justified.
+
+**One cut item could change what the paper claims. Everything else is rigour.**
+
+§3.2, widening the generator — together with §2.3, which makes the resulting
+policy trainable in reasonable time — is the only item that could produce a
+first zero-shot lap on an official track. That is a new claim, not better
+support for an existing one:
+
+> **Now:** trained on generated tracks, generalises within that distribution,
+> fails on all four official tracks, and §6.2 measures why — 147x outside the
+> policy's own observation support, with vertical velocity and roll rate the
+> features furthest out.
+>
+> **With §3.2:** and when exactly those features were added to the generator,
+> the measured distance fell and the policy drove human-designed tracks it had
+> never seen.
+
+The second is a demonstrated mechanism rather than a diagnosis, and it is the
+strongest available use of §6.2, which made a falsifiable prediction that
+nothing else on the list tests.
+
+It may also fail, and there is already evidence against it: the Summer 1 scratch
+policies never saw a generated track and **fail at the same jumps** as the
+pretrained ones. If jumps are hard to *learn* rather than merely unfamiliar,
+widening the generator buys nothing. Near even odds, which is good for research
+and is not a certainty.
+
+Everything else that was cut — §3.3's 60 hours, tracks beyond a second one, the
+ablations, a second algorithm, evaluation episodes — makes existing claims
+harder to attack without changing any of them.
+
+| option | cost | what it buys |
+|---|---|---|
+| **this plan** (§2 below) | ~2 days + one lap | submit what exists, honest and defensible |
+| **this plan + §2.3 + §3.2** | ~2-3 weeks | one shot at a qualitatively better claim |
+| **`PAPER_PLAN.md` in full** | 5-7 weeks | the above, plus rigour that does not change the claim |
+
+The middle option captures nearly all of the upside, because the expensive half
+of the programme is also the pure-rigour half. **Do §2 of this document first in
+every case** -- the 18.809 and the Kodub email are on the critical path for all
+three.
+
 ## 1. Verified before cutting anything
 
 Three of `PAPER_PLAN.md`'s claims bear on text already pushed to `main`. All
@@ -210,3 +257,8 @@ Every reported lap goes through `scripts/run_gate.py` **and**
 
 Each of those is a sentence in §7 of PAPER.md rather than a gap in the
 argument — which is the test this cut was made against.
+
+The exception is the first one, and §0 is where it is argued: a zero-shot lap on
+an official track is not a sentence in §7, it is a result the paper does not
+have. If that result is wanted, §2.3 and §3.2 come back and the budget is two to
+three weeks rather than two days. Nothing else does.
