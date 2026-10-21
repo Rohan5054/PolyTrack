@@ -71,6 +71,14 @@ class IQNConfig:
     #: 0.999 at a 50 ms control interval is a horizon of ~35 s, which spans a
     #: lap. The usual 0.99 is five seconds -- shorter than a corner sequence, so
     #: the agent cannot value the far side of the track at all.
+    #:
+    #: ``learn`` never reads this. Each transition arrives with the discount its
+    #: collector applied to the n-step return, so the value reaches the critic
+    #: only through ``CollectorConfig.gamma``, which ``train.py`` sets from
+    #: here. The banked results used ``train.py``'s old ``--gamma`` default of
+    #: 0.99 instead: the generalisation and Summer 1 checkpoints record it, and
+    #: for the Winter 5 and 300k-seed runs, whose checkpoints are gone, it is
+    #: inferred from that default.
     gamma: float = 0.999
     kappa: float = 1.0  # Huber transition point
     grad_clip: float = 10.0
@@ -239,6 +247,11 @@ class IQNAgent:
             self.online.parameters(), lr=self.config.lr, eps=self.config.adam_eps
         )
         self.steps = 0
+        #: The step count saved in the checkpoint this agent was loaded from, or
+        #: None if it was built. Unlike ``steps`` it survives a ``weights_only``
+        #: load, which restarts the count, so the log can still say how far the
+        #: starting weights were trained. Not saved.
+        self.source_steps: int | None = None
         self._allowed, self._blocked = _action_restriction(self.config, self.device)
 
     def restrict(self, allowed_actions: tuple[int, ...] | None) -> None:
@@ -254,6 +267,34 @@ class IQNAgent:
         self.online.config = self.config
         self.target.config = self.config
         self._allowed, self._blocked = _action_restriction(self.config, self.device)
+
+    def set_gamma(self, gamma: float) -> None:
+        """Change the discount, keeping everything else.
+
+        Rebuilding the agent would lose the Adam state, as it would for
+        :meth:`restrict`. ``learn`` never reads the discount -- each transition
+        arrives with the one its collector applied -- so this changes what the
+        collectors must be built from and what the next checkpoint records,
+        and a caller that does not rebuild them from ``config`` afterwards is
+        still training at the old value.
+        """
+        self.config = replace(self.config, gamma=float(gamma))
+        self.online.config = self.config
+        self.target.config = self.config
+
+    def set_lr(self, lr: float) -> None:
+        """Change the learning rate, keeping everything else, Adam's moments too.
+
+        The optimiser keeps its own copy of the rate in each parameter group,
+        and a resumed one has the checkpoint's, restored with the rest of its
+        state. Changing ``config`` alone would therefore record a rate the run
+        never trained at, which is why both move here.
+        """
+        self.config = replace(self.config, lr=float(lr))
+        self.online.config = self.config
+        self.target.config = self.config
+        for group in self.optimiser.param_groups:
+            group["lr"] = self.config.lr
 
     # -- acting --------------------------------------------------------------
 
@@ -383,7 +424,12 @@ class IQNAgent:
 
     @classmethod
     def load(
-        cls, path, device: str = "cpu", *, reset_optimiser: bool = False
+        cls,
+        path,
+        device: str = "cpu",
+        *,
+        reset_optimiser: bool = False,
+        weights_only: bool = False,
     ) -> "IQNAgent":
         """Restore an agent from a checkpoint.
 
@@ -395,10 +441,30 @@ class IQNAgent:
         variable moving alongside the weights, in precisely the early steps the
         measurement is about. Resuming a run that was interrupted wants the
         opposite, which is why this defaults to False.
+
+        ``weights_only`` is what that question needs in full, because dropping
+        Adam leaves two more pieces of the old run behind. The step counter
+        keys the prioritised replay's importance-sampling schedule, 0.4 to 1
+        over 500k steps, so a load from a 1.22M-step checkpoint samples at 1.0
+        from its first batch where a fresh run starts at 0.4. And the saved
+        target network lags the online one by up to ``target_update_every``
+        steps, where a fresh agent's target starts as a copy of its online
+        network. So this puts the *online* weights in both networks, with a
+        fresh optimiser and ``steps`` at zero: a new run that starts from
+        these weights, not a continuation. ``source_steps`` keeps the old count.
+
+        Neither is ``torch.load``'s ``weights_only``, which has to stay False
+        because the checkpoint pickles an ``IQNConfig``.
         """
         blob = torch.load(path, map_location=device, weights_only=False)
         agent = cls(_upgrade_config(blob["config"]), device=device)
+        agent.source_steps = blob["steps"]
         agent.online.load_state_dict(blob["online"])
+        if weights_only:
+            # The constructor has already made the fresh optimiser and step
+            # count; only the target needs the online weights.
+            agent.target.load_state_dict(blob["online"])
+            return agent
         agent.target.load_state_dict(blob["target"])
         if not reset_optimiser:
             agent.optimiser.load_state_dict(blob["optimiser"])

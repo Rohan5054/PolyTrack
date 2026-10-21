@@ -25,6 +25,7 @@ import json
 import sys
 import time
 from collections import deque
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -102,8 +103,21 @@ def parse_args(argv=None):
              "run burns the full budget at a fifth of par pace",
     )
     parser.add_argument("--n-step", type=int, default=5)
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument(
+        "--gamma", type=float, default=None,
+        help="discount per decision. Unset means IQNConfig's, "
+             f"{IQNConfig().gamma:g}, the value the agent was designed around. "
+             "The banked results used this flag's old default of 0.99 (the "
+             "generalisation and Summer 1 checkpoints record it), so pass "
+             "--gamma 0.99 to reproduce one. With --resume the checkpoint's "
+             "discount stands unless this is given",
+    )
+    parser.add_argument(
+        "--lr", type=float, default=None,
+        help=f"learning rate. Unset means IQNConfig's, {IQNConfig().lr:g}. "
+             "With --resume the checkpoint's stands unless this is given, as "
+             "for --gamma, and then Adam's rate changes with it",
+    )
     parser.add_argument("--max-steps", type=int, default=10_000_000)
     parser.add_argument("--max-seconds", type=float, default=float("inf"))
     parser.add_argument("--checkpoint-every", type=int, default=20_000)
@@ -117,16 +131,166 @@ def parse_args(argv=None):
     parser.add_argument(
         "--reset-optimiser", action="store_true",
         help="with --resume, keep the weights and discard Adam's moment "
-             "estimates. For a transfer experiment: otherwise the pretrained "
-             "arm differs from its from-scratch control in two ways at once, "
-             "weights and effective step size, in exactly the early steps the "
-             "measurement is about. Leave it off to resume an interrupted run",
+             "estimates, which set the effective step size over a run's early "
+             "steps. It keeps the step count and the target network, so a "
+             "transfer experiment wants --weights-only instead. Leave it off "
+             "to resume an interrupted run",
+    )
+    parser.add_argument(
+        "--weights-only", action="store_true",
+        help="with --resume, start a new run from the checkpoint's weights: "
+             "its online weights in both networks, a fresh optimiser, the "
+             "step count at zero, and none of the earlier run's log, clock or "
+             "best laps. Its lr, gamma and action restriction still come from "
+             "the checkpoint unless --lr, --gamma, --forward-only or "
+             "--all-actions say otherwise, so give a from-scratch control the "
+             "same values explicitly. The load for a transfer experiment; "
+             "--reset-optimiser alone keeps the step count, which the "
+             "replay's importance-sampling schedule is keyed on",
     )
     parser.add_argument(
         "--smoke", action="store_true",
         help="two workers, 90 seconds, tiny buffer -- proves the loop runs",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # Here rather than in main() so it fails before anything is built, and so
+    # a test can reach it. Ignored instead, either flag would let the run
+    # quietly start from scratch: a pretrained arm that is really a second
+    # control. --reset-optimiser was the transfer flag before --weights-only,
+    # so an old pretrained-arm command that lost its --resume is the case.
+    for flag, given in (("--weights-only", args.weights_only),
+                        ("--reset-optimiser", args.reset_optimiser)):
+        if given and args.resume is None:
+            parser.error(f"{flag} needs --resume: it says how to load a "
+                         "checkpoint, and none was given")
+    return args
+
+
+def start_agent(args) -> tuple[IQNAgent, list[dict], float, dict[str, int]]:
+    """The agent this run trains, and what it carries from an earlier sitting.
+
+    Returns ``(agent, history, elapsed_offset, resumed_best)``: the log rows,
+    the seconds already on the clock and the best frames per track that a
+    resumed run continues from, all empty for a new run. Kept out of
+    :func:`main` so a test can check it without starting a collector.
+    """
+    history: list[dict] = []
+    elapsed_offset = 0.0
+    resumed_best: dict[str, int] = {}
+    if args.resume:
+        agent = IQNAgent.load(
+            args.resume,
+            reset_optimiser=args.reset_optimiser,
+            weights_only=args.weights_only,
+        )
+        # Carry the previous block's log forward so a run split across several
+        # sittings still plots as one curve. gradient_steps is already
+        # continuous because it lives on the agent; seconds would restart at
+        # zero without this, which makes the graph lie about the pace.
+        #
+        # Not under --weights-only. That is a new run starting from another
+        # run's weights, not a later sitting of it, and bringing that run's log,
+        # clock and best laps forward would graft its curve onto this one.
+        earlier = args.resume.parent / "history.json"
+        if earlier.exists() and not args.weights_only:
+            history = json.loads(earlier.read_text())
+            elapsed_offset = history[-1]["seconds"] if history else 0.0
+            # Best times have to come forward too. Restarting the tracking each
+            # block made the reported best jump back up whenever a block's first
+            # finish was slower than an earlier block's -- so the headline number
+            # was not the best at all, just the best since the last Ctrl+C.
+            for row in history:
+                for name, seconds in (row.get("best") or {}).items():
+                    frames = int(round(seconds * 1000))
+                    if frames < resumed_best.get(name, 1 << 62):
+                        resumed_best[name] = frames
+        if args.weights_only:
+            print(f"\n  weights from {args.resume} ({agent.source_steps:,} "
+                  "gradient steps), starting at step 0")
+        else:
+            print(f"\n  resumed from {args.resume} at {agent.steps:,} gradient "
+                  f"steps / {elapsed_offset / 60:.0f} min")
+        # The checkpoint's discount and learning rate stand unless a flag names
+        # another. Then the agent changes, not only the collectors or the
+        # optimiser, so every checkpoint this run writes records what it
+        # actually trained at. Both are printed, and --lr is honoured at all,
+        # because a flag a resume drops in silence lets the same flags give a
+        # transfer experiment's two arms different values.
+        if args.gamma is not None and args.gamma != agent.config.gamma:
+            print(f"  --gamma {args.gamma} overrides the checkpoint's "
+                  f"{agent.config.gamma}")
+            agent.set_gamma(args.gamma)
+        if args.lr is not None and args.lr != agent.config.lr:
+            print(f"  --lr {args.lr} overrides the checkpoint's "
+                  f"{agent.config.lr}")
+            agent.set_lr(args.lr)
+    else:
+        # IQNConfig's values unless a flag names one; iqn.py says why its
+        # default discount is 0.999 rather than the usual 0.99.
+        config = IQNConfig()
+        if args.lr is not None:
+            config = replace(config, lr=args.lr)
+        if args.gamma is not None:
+            config = replace(config, gamma=args.gamma)
+        agent = IQNAgent(config)
+    return agent, history, elapsed_offset, resumed_best
+
+
+def collector_config_for(args, agent: IQNAgent) -> CollectorConfig:
+    """What every collector is built from, taken from ``agent`` wherever the
+    two could disagree.
+
+    Kept out of :func:`main` for the reason :func:`start_agent` is: the gamma
+    below is the discount the critic trains at, and a test has to be able to
+    check it without starting a collector.
+    """
+    return CollectorConfig(
+        seed=args.seed,
+        library_path=str(args.library.resolve()),
+        track_names=tuple(args.track or ()),
+        control_interval_ms=args.control_interval_ms,
+        time_limit_factor=args.time_limit_factor,
+        n_step=args.n_step,
+        # The agent's discount, not the flag's. A resumed learner keeps the
+        # checkpoint's unless --gamma overrides it, and the two must agree for
+        # the reason given for iqn_config below -- more than agree, in fact:
+        # learn() reads no gamma of its own, since every transition arrives
+        # with the discount its collector applied to the n-step return. This
+        # line *is* the discount the critic trains at. CollectorConfig has a
+        # gamma of its own defaulting to 0.99, so leaving it out would train
+        # at 0.99 while every checkpoint recorded the agent's value.
+        gamma=agent.config.gamma,
+        # The agent's config, not one rebuilt from the CLI. A resumed learner
+        # takes its config from the checkpoint, so building the collectors' from
+        # the flags instead let the two disagree -- and they must not: an action
+        # the collectors can take but the learner masks is a transition the
+        # critic is asked to value for a policy that never plays it.
+        iqn_config=agent.config,
+    )
+
+
+def run_directory(args) -> Path:
+    """``runs/<name>``, unless a ``--weights-only`` start there would
+    overwrite a run.
+
+    That start is a new run, so its log begins empty, and pointed at a
+    directory that already holds a run -- the one its weights come from, or a
+    banked run that happens to share the name -- it would write over that
+    run's history.json at the first log line and its agent.pt at the first
+    checkpoint or on any exit, Ctrl+C included. A plain --resume into the same
+    name is safe, since it carries the log forward. A fresh start is left as it
+    was: --smoke reuses runs/smoke every time.
+    """
+    out = Path("runs") / args.name
+    if args.weights_only and any(
+        (out / name).exists() for name in ("agent.pt", "history.json")
+    ):
+        raise SystemExit(
+            f"\n  {out} already holds a run, and --weights-only starts a new "
+            "one there that would write over its agent.pt and history.json."
+            "\n  Pass another --name, or move that run aside.\n"
+        )
+    return out
 
 
 def main(argv=None) -> int:
@@ -139,6 +303,8 @@ def main(argv=None) -> int:
         args.batch_size = 64
         args.log_every = 10.0
         args.name = "smoke"
+    # Before anything is loaded or written, so a refusal costs nothing.
+    out = run_directory(args)
 
     import torch
 
@@ -161,35 +327,9 @@ def main(argv=None) -> int:
     if args.track:
         library = library.select(args.track)
 
-    out = Path("runs") / args.name
     out.mkdir(parents=True, exist_ok=True)
 
-    history: list[dict] = []
-    elapsed_offset = 0.0
-    resumed_best: dict[str, int] = {}
-    if args.resume:
-        agent = IQNAgent.load(args.resume, reset_optimiser=args.reset_optimiser)
-        # Carry the previous block's log forward so a run split across several
-        # sittings still plots as one curve. gradient_steps is already
-        # continuous because it lives on the agent; seconds would restart at
-        # zero without this, which makes the graph lie about the pace.
-        earlier = args.resume.parent / "history.json"
-        if earlier.exists():
-            history = json.loads(earlier.read_text())
-            elapsed_offset = history[-1]["seconds"] if history else 0.0
-            # Best times have to come forward too. Restarting the tracking each
-            # block made the reported best jump back up whenever a block's first
-            # finish was slower than an earlier block's -- so the headline number
-            # was not the best at all, just the best since the last Ctrl+C.
-            for row in history:
-                for name, seconds in (row.get("best") or {}).items():
-                    frames = int(round(seconds * 1000))
-                    if frames < resumed_best.get(name, 1 << 62):
-                        resumed_best[name] = frames
-        print(f"\n  resumed from {args.resume} at {agent.steps:,} gradient steps"
-              f" / {elapsed_offset / 60:.0f} min")
-    else:
-        agent = IQNAgent(IQNConfig(lr=args.lr, gamma=args.gamma))
+    agent, history, elapsed_offset, resumed_best = start_agent(args)
 
     # An action restriction is part of the checkpoint, so a resume keeps whatever
     # it was trained under unless told otherwise. Changing it here rather than at
@@ -206,21 +346,8 @@ def main(argv=None) -> int:
               "records brake for 8-21% of the lap on\n  every track except "
               "Winter 5. Pass --track to train one, or --all-actions.\n")
 
-    collector_config = CollectorConfig(
-        seed=args.seed,
-        library_path=str(args.library.resolve()),
-        track_names=tuple(args.track or ()),
-        control_interval_ms=args.control_interval_ms,
-        time_limit_factor=args.time_limit_factor,
-        n_step=args.n_step,
-        gamma=args.gamma,
-        # The agent's config, not one rebuilt from the CLI. A resumed learner
-        # takes its config from the checkpoint, so building the collectors' from
-        # the flags instead let the two disagree -- and they must not: an action
-        # the collectors can take but the learner masks is a transition the
-        # critic is asked to value for a policy that never plays it.
-        iqn_config=agent.config,
-    )
+    # After the restriction above, which the collectors must share.
+    collector_config = collector_config_for(args, agent)
     replay = PrioritisedReplay(
         capacity=args.capacity, obs_dim=agent.config.obs_dim
     )
@@ -228,7 +355,8 @@ def main(argv=None) -> int:
     print(f"\n  {args.name}")
     print(library.describe())
     print(f"\n  {args.workers} collectors, batch {args.batch_size}, "
-          f"n-step {args.n_step}, replay ratio {args.replay_ratio}")
+          f"n-step {args.n_step}, gamma {collector_config.gamma}, "
+          f"lr {agent.config.lr:g}, replay ratio {args.replay_ratio}")
     print(f"  episode budget {args.time_limit_factor:g}x par")
     print("  actions: " + (
         "all 9" if restriction is None

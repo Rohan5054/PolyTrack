@@ -48,10 +48,14 @@ started from `arms/generalisation/agent.pt` with weights only (§2.2).
   attempts on the 47 m descent where the scratch ones do not: 8 against 4, and
   all 4 scratch ones came from the 50k pilot.
 
-How to report it: as §8.5 anticipates, a weak or null transfer result on this
-track, consistent with §6.2, with the failure located. It also settles the
-budget question for any rerun: as run, the first-lap metric needs a much larger
-budget or the changes in §2.3-§2.4.
+How to report it: **inconclusive at this budget.** Both arms stopped at 150k
+steps, inside the range where even the generated-track policy had not learned to
+finish (`arms/generalisation/learning_curve.csv`: complete greedy laps only by
+~155k, on far easier tracks), so the run cannot say whether transfer helps. The
+one finding that does not depend on the budget is the early dip. An earlier
+version of this paragraph called it "a weak or null transfer result, consistent
+with §6.2"; `updated_paper_plan.md` §0 is right that this over-read it. The
+budget question is what `scripts/separator_experiment.py` answers.
 
 ## 2. Fix before running anything else
 

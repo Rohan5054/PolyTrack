@@ -53,20 +53,24 @@ That is one track. See [What this does not show](#what-this-does-not-show).
 | **Generalisation to unseen tracks** | **Done — 97.9% ± 0.6% over three seeds, 16 held-out tracks** |
 | Scripted pure-pursuit driver | Done — drivability filter and baseline floor |
 
-**157 tests passing.** Four suites reach for files not in the repo and are
+**168 tests passing.** Four suites reach for files not in the repo and are
 stronger when they find them; without them they skip and say so.
 
 ## Quick start
 
+The suites import the `polytrack` package, so install it first as below, or
+prefix each command with `PYTHONPATH=.` — a fresh clone run with a plain
+`python3` stops at `No module named 'polytrack'`.
+
 ```bash
-pip install -e .[learning]      # torch is training-only
+pip install -e ".[learning]"    # torch is training-only
 python tests/test_core.py       # 24
 python tests/test_search.py     # 17
 python tests/test_trackcode.py  # 12
 python tests/test_wasm.py       # 19  (needs the game files)
 python tests/test_recording.py  # 14
 python tests/test_reference.py  # 18  (needs the game files)
-python tests/test_learning.py   # 23  (needs torch)
+python tests/test_learning.py   # 33  (needs torch)
 python tests/test_spline.py     #  6
 python tests/test_generator.py  # 12  (4 need the game files)
 python tests/test_pursuit.py    #  8
@@ -179,6 +183,11 @@ POLYTRACK_TRACKS=path/to/tracks python scripts/build_library.py   # once, ~3 min
 python scripts/train.py --smoke                                   # 90 s
 python scripts/train.py --workers 6 --track "Winter 5" --forward-only
 ```
+
+`--gamma` defaults to the agent's own 0.999. The results in this README used
+the flag's old default of 0.99, which the 1.22M-step generalisation checkpoint
+records (for the Winter 5 and 300k-seed runs, whose checkpoints are gone, it is
+inferred from that default), so pass `--gamma 0.99` to reproduce one.
 
 IQN — distributional Q-learning — with prioritised replay, 5-step returns and
 several collector processes feeding one learner. That is Linesight's

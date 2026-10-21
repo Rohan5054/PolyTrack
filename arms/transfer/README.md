@@ -22,9 +22,11 @@ Air (16 GB) with `scripts/transfer_experiment.py`.
   importance-sampling exponent anneals on that counter (0.4 to 1 over 500k
   steps), so a resumed 1.22M-step arm would sample at 1.0 from its first batch
   while the scratch arm starts at 0.4. See `PAPER_PLAN.md` §2.2.
-- **Identical otherwise:** lr 5e-5 and gamma 0.99 for both (the checkpoint's
-  values, and `train.py`'s defaults -- see `PAPER_PLAN.md` §2.1), six
-  collectors, all nine actions, a log row every 5 s.
+- **Identical otherwise:** lr 5e-5 and gamma 0.99 for both, passed explicitly
+  (the checkpoint's values; `train.py` defaulted to 0.99 at the time, and now
+  defaults to `IQNConfig`'s 0.999 -- see `PAPER_PLAN.md` §2.1), six collectors,
+  all nine actions, a log row every 5 s. With the current code the same start
+  is `train.py --resume arms/generalisation/agent.pt --weights-only`.
 - **Runs:** a pilot pair at 50k steps (seed 0), then seeds 1-3 at 150k each.
   The arms were interleaved, with the order flipped each seed, so drift over
   the evening did not land on one arm.

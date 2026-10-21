@@ -37,6 +37,9 @@ import numpy as np
 #: Laps to check: (label, artifact, frames to pick when the file holds several).
 LAPS = [
     ("human PB", "records.json", 19025),
+    # The best human lap known, played by an author; the search's margin is
+    # measured against this one.
+    ("human best", "records.json", 18809),
     ("Arm 1  policy alone", "arms/arm1-policy/winter_5.json", None),
     ("Arm 2  policy + guided beam", "arms/arm2-search/winter_5.json", None),
 ]

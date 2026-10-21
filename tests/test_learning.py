@@ -543,15 +543,16 @@ def test_the_cache_evicts_least_recently_used():
 
 
 def test_loading_can_keep_the_weights_and_drop_the_optimiser():
-    """The transfer experiment needs one variable to move, not two.
+    """A resume keeps Adam's moments; ``reset_optimiser`` drops them alone.
 
-    A pretrained arm measured against a from-scratch control differs in its
-    weights, which is the point, and in Adam's moment estimates, which is not:
-    those set the effective step size over exactly the early steps that
-    "time to first completed lap" is made of. ``reset_optimiser`` separates
-    them. Resuming an interrupted run wants the moments kept, so the default
-    has to stay False -- a flag that silently discarded them would quietly
-    damage every resume in the project.
+    The moments set the effective step size over a run's early steps, so they
+    are worth dropping on purpose and never by accident. Resuming an
+    interrupted run wants them kept, so the default has to stay False -- a flag
+    that silently discarded them would quietly damage every resume in the
+    project. This is not the transfer experiment's load: ``reset_optimiser``
+    keeps the step count and the stale target, which
+    ``test_loading_weights_only_starts_a_new_run_from_the_online_weights``
+    covers.
     """
     torch = _torch()
     if torch is None:
@@ -592,6 +593,441 @@ def test_loading_can_keep_the_weights_and_drop_the_optimiser():
         for key, value in fresh.online.state_dict().items():
             assert torch.equal(value, weights[key]), f"{key} did not survive"
         assert fresh.steps == agent.steps
+
+
+def _learn_a_little(agent, steps: int = 1) -> None:
+    """A few gradient steps on random data, so Adam has state and steps > 0."""
+    obs_dim, n_actions = agent.config.obs_dim, agent.config.n_actions
+    batch = (
+        np.random.randn(8, obs_dim).astype(np.float32),
+        np.random.randint(0, n_actions, 8).astype(np.int64),
+        np.random.rand(8).astype(np.float32),
+        np.random.randn(8, obs_dim).astype(np.float32),
+        np.zeros(8, dtype=np.float32),
+        np.full(8, 0.99, dtype=np.float32),
+    )
+    for _ in range(steps):
+        agent.learn(batch, np.ones(8, dtype=np.float32))
+
+
+def test_loading_weights_only_starts_a_new_run_from_the_online_weights():
+    """What a transfer comparison loads: the weights, and nothing of the run.
+
+    ``reset_optimiser`` drops Adam but keeps two things a from-scratch control
+    does not have. The step counter keys the replay's importance-sampling
+    schedule, so a load from 1.22M steps samples at beta 1.0 from its first
+    batch while the control starts at 0.4. And the saved target is a stale
+    copy, where a fresh agent's target is its online network -- so the target
+    has to come from the saved *online* weights.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    config = IQNConfig(
+        obs_dim=8, hidden=32, lr=1e-3, gamma=0.99, allowed_actions=(3, 4, 5)
+    )
+    agent = IQNAgent(config)
+    _learn_a_little(agent, steps=3)
+    # Three steps leave the target at its initial copy, so it already differs
+    # from the online network. Move it further anyway, so that a load which
+    # took the saved target fails below whatever target_update_every is.
+    with torch.no_grad():
+        for parameter in agent.target.parameters():
+            parameter.add_(1.0)
+    online = {k: v.clone() for k, v in agent.online.state_dict().items()}
+    assert agent.optimiser.state_dict()["state"], "the fixture built no Adam state"
+    assert agent.steps == 3
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "agent.pt"
+        agent.save(path)
+        loaded = IQNAgent.load(path, weights_only=True)
+
+    for key, value in loaded.online.state_dict().items():
+        assert torch.equal(value, online[key]), f"online {key} did not survive"
+    for key, value in loaded.target.state_dict().items():
+        assert torch.equal(value, online[key]), (
+            f"target {key} is not the saved online network"
+        )
+    assert not loaded.optimiser.state_dict()["state"], "Adam's moments survived"
+    assert loaded.steps == 0, "the step count came forward"
+    assert loaded.source_steps == 3, "lost the count the weights were trained for"
+    assert loaded.config == config, "the config did not come from the checkpoint"
+
+
+def test_the_discount_can_be_changed_without_losing_the_run():
+    """``--gamma`` on a resume replaces the checkpoint's, as ``restrict`` does.
+
+    The new value has to reach every holder of the config and the next
+    checkpoint, so a later resume continues at it, and nothing else may move:
+    by then Adam's state is worth as much as the weights.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    agent = IQNAgent(IQNConfig(obs_dim=8, hidden=32, gamma=0.99))
+    _learn_a_little(agent)
+    exp_avg = agent.optimiser.state_dict()["state"][0]["exp_avg"].clone()
+    weights = {k: v.clone() for k, v in agent.online.state_dict().items()}
+
+    agent.set_gamma(0.999)
+    assert agent.config.gamma == 0.999
+    assert agent.online.config is agent.config
+    assert agent.target.config is agent.config
+    assert agent.steps == 1, "changing the discount reset the step count"
+    assert torch.equal(agent.optimiser.state_dict()["state"][0]["exp_avg"], exp_avg)
+    for key, value in agent.online.state_dict().items():
+        assert torch.equal(value, weights[key]), f"{key} changed"
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "agent.pt"
+        agent.save(path)
+        assert IQNAgent.load(path).config.gamma == 0.999, (
+            "the checkpoint recorded the old discount"
+        )
+
+
+def _train_script():
+    """``scripts/train.py`` as a module, loaded from its path without running.
+
+    It is a script rather than part of the package, and ``main`` only runs
+    under ``__main__``, so its argument parsing and agent start-up can be
+    called directly -- nothing here starts a collector.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "train.py"
+    spec = importlib.util.spec_from_file_location("train_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _parse(train, *argv):
+    """``train.parse_args`` on these flags, with a rejection made a failure.
+
+    argparse rejects by raising SystemExit, which the runner below does not
+    catch, so a regression in the CLI would end the whole suite at its usage
+    message -- reading as though this file had been given a bad argument --
+    instead of failing one test and running the rest.
+    """
+    import contextlib
+    import io
+
+    errors = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(errors):
+            return train.parse_args(list(argv))
+    except SystemExit as stopped:
+        raise AssertionError(
+            f"argparse rejected {list(argv)} (exit {stopped.code}):\n"
+            + errors.getvalue()
+        ) from None
+
+
+def _start(train, *argv):
+    """``train.start_agent`` on these flags: its four results, then its output."""
+    import contextlib
+    import io
+
+    args = _parse(train, *argv)
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        started = train.start_agent(args)
+    return (*started, printed.getvalue())
+
+
+def test_train_takes_the_discount_from_the_config_unless_told():
+    """An unset ``--gamma`` has to mean IQNConfig's, not a default of its own.
+
+    The flag defaulted to 0.99 and was always passed in, so the 0.999 that
+    ``IQNConfig`` was designed around never once took effect. Every banked
+    result is a 0.99 run, and reproduces with ``--gamma 0.99``.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    from polytrack.learning.iqn import IQNConfig
+
+    train = _train_script()
+    assert _parse(train).gamma is None
+    fresh, *_ = _start(train)
+    assert fresh.config.gamma == IQNConfig().gamma
+    told, *_ = _start(train, "--gamma", "0.99")
+    assert told.config.gamma == 0.99
+
+
+def test_train_refuses_a_load_flag_without_a_checkpoint():
+    """``--weights-only`` and ``--reset-optimiser`` say how to load ``--resume``'s
+    checkpoint.
+
+    Ignored when there is none, either would let the run quietly start from
+    scratch: a pretrained arm that is really a second control.
+    ``--reset-optimiser`` was the transfer flag first, so an old
+    pretrained-arm command that lost its ``--resume`` is the likely way in.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import contextlib
+    import io
+
+    train = _train_script()
+    for flag in ("--weights-only", "--reset-optimiser"):
+        errors = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(errors):
+                train.parse_args([flag])
+        except SystemExit as stopped:
+            assert stopped.code == 2, f"{flag}: exited with {stopped.code}"
+        else:
+            raise AssertionError(f"{flag} was accepted without --resume")
+        # The message itself: the usage block argparse prints ahead of every
+        # error names --resume too, so finding that would prove nothing.
+        assert f"{flag} needs --resume" in errors.getvalue(), errors.getvalue()
+    assert _parse(train, "--resume", "agent.pt", "--weights-only").weights_only
+    assert _parse(train, "--resume", "agent.pt", "--reset-optimiser").reset_optimiser
+
+
+def test_a_weights_only_start_carries_nothing_of_the_earlier_run():
+    """A later sitting continues a run's log; a new run from its weights must not.
+
+    A run split across sittings brings its log, clock and best laps forward so
+    that it plots as one curve. A run started from another run's weights is a
+    new run, and the same carry-forward would graft that run's curve onto it.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import json
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    train = _train_script()
+    source = IQNAgent(IQNConfig(obs_dim=8, hidden=32))
+    _learn_a_little(source, steps=2)
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "agent.pt"
+        source.save(path)
+        (Path(folder) / "history.json").write_text(json.dumps(
+            [{"seconds": 600.0, "best": {"Summer 1": 30.5}}]
+        ))
+
+        resumed, history, elapsed, best, printed = _start(
+            train, "--resume", str(path)
+        )
+        assert resumed.steps == 2 and len(history) == 1
+        assert elapsed == 600.0 and best == {"Summer 1": 30500}
+        assert "resumed from" in printed, printed
+
+        fresh, history, elapsed, best, printed = _start(
+            train, "--resume", str(path), "--weights-only"
+        )
+        assert fresh.steps == 0, "the step count came forward"
+        assert (history, elapsed, best) == ([], 0.0, {}), (
+            "the earlier run's log came forward"
+        )
+        assert "weights from" in printed, printed
+        assert "(2 gradient steps), starting at step 0" in printed, printed
+
+
+def test_gamma_on_a_resume_overrides_the_checkpoint_and_says_so():
+    """The checkpoint's discount stands unless ``--gamma`` names another.
+
+    Overriding has to change the agent, not only the collectors, or the run
+    trains at one discount while every checkpoint it writes records another.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    train = _train_script()
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "agent.pt"
+        IQNAgent(IQNConfig(obs_dim=8, hidden=32, gamma=0.99)).save(path)
+
+        kept, *_, printed = _start(train, "--resume", str(path))
+        assert kept.config.gamma == 0.99, "a resume without --gamma changed it"
+        assert "overrides" not in printed, printed
+
+        same, *_, printed = _start(train, "--resume", str(path), "--gamma", "0.99")
+        assert same.config.gamma == 0.99 and "overrides" not in printed, printed
+
+        changed, *_, printed = _start(
+            train, "--resume", str(path), "--gamma", "0.999"
+        )
+        assert changed.config.gamma == 0.999
+        assert changed.online.config.gamma == 0.999
+        assert "--gamma 0.999 overrides the checkpoint's 0.99" in printed, printed
+
+
+def test_lr_on_a_resume_overrides_the_checkpoint_and_says_so():
+    """``--lr`` works as ``--gamma`` does: the checkpoint's unless it is given.
+
+    It used to be read by a fresh start alone, so any resume -- a
+    ``--weights-only`` one included -- dropped it without a word, and the same
+    flags could give a transfer experiment's two arms different learning
+    rates. Given, it has to reach Adam's parameter groups, which are what the
+    optimiser steps at, as well as the config, and nothing else may move.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    def rates(agent):
+        return {group["lr"] for group in agent.optimiser.param_groups}
+
+    train = _train_script()
+    assert _parse(train).lr is None
+    fresh, *_ = _start(train)
+    assert fresh.config.lr == IQNConfig().lr
+    told, *_ = _start(train, "--lr", "1e-4")
+    assert told.config.lr == 1e-4 and rates(told) == {1e-4}
+
+    source = IQNAgent(IQNConfig(obs_dim=8, hidden=32, lr=5e-5))
+    _learn_a_little(source, steps=2)
+    exp_avg = source.optimiser.state_dict()["state"][0]["exp_avg"].clone()
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "agent.pt"
+        source.save(path)
+
+        kept, *_, printed = _start(train, "--resume", str(path))
+        assert kept.config.lr == 5e-5 and rates(kept) == {5e-5}
+        assert "overrides" not in printed, printed
+        same, *_, printed = _start(train, "--resume", str(path), "--lr", "5e-5")
+        assert same.config.lr == 5e-5 and "overrides" not in printed, printed
+
+        changed, *_, printed = _start(
+            train, "--resume", str(path), "--lr", "1e-4"
+        )
+        assert changed.config.lr == 1e-4
+        assert rates(changed) == {1e-4}, "Adam kept the checkpoint's rate"
+        assert "--lr 0.0001 overrides the checkpoint's 5e-05" in printed, printed
+        assert changed.steps == 2, "changing the rate reset the step count"
+        assert torch.equal(
+            changed.optimiser.state_dict()["state"][0]["exp_avg"], exp_avg
+        ), "changing the rate lost Adam's moments"
+
+        # A --weights-only start is a transfer experiment's pretrained arm, so
+        # it has to take the --lr its from-scratch control is given.
+        moved, *_ = _start(
+            train, "--resume", str(path), "--weights-only", "--lr", "1e-4"
+        )
+        assert moved.config.lr == 1e-4 and rates(moved) == {1e-4}
+
+        changed.save(path)
+        again = IQNAgent.load(path)
+        assert again.config.lr == 1e-4 and rates(again) == {1e-4}, (
+            "the checkpoint recorded the old rate"
+        )
+
+
+def test_the_collectors_discount_is_the_agents():
+    """The collectors' n-step discount is the one the critic trains at.
+
+    ``learn`` reads no gamma of its own -- every transition arrives discounted
+    by its collector -- and ``CollectorConfig`` keeps a gamma of its own that
+    defaults to 0.99. Left at that default, a fresh run would train at 0.99
+    while every checkpoint recorded 0.999; built from the flag instead, an
+    unset ``--gamma`` would hand the workers None, which fails only once they
+    are running.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import contextlib
+    import io
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    train = _train_script()
+    with tempfile.TemporaryDirectory() as folder:
+        path = str(Path(folder) / "agent.pt")
+        IQNAgent(IQNConfig(obs_dim=8, hidden=32, gamma=0.99)).save(path)
+        for argv, expected in (
+            ((), IQNConfig().gamma),
+            (("--gamma", "0.99"), 0.99),
+            (("--resume", path), 0.99),
+            (("--resume", path, "--gamma", "0.999"), 0.999),
+            (("--resume", path, "--weights-only"), 0.99),
+        ):
+            args = _parse(train, *argv)
+            with contextlib.redirect_stdout(io.StringIO()):
+                agent, *_ = train.start_agent(args)
+            config = train.collector_config_for(args, agent)
+            assert config.gamma == agent.config.gamma == expected, (
+                f"{argv}: collectors at {config.gamma}, agent at "
+                f"{agent.config.gamma}, wanted {expected}"
+            )
+            assert config.iqn_config is agent.config, argv
+
+
+def test_a_weights_only_start_will_not_write_over_a_run():
+    """A new run's log starts empty, so it must not start in a run's directory.
+
+    Pointed at one -- the run its weights come from, or a banked run that
+    shares the name -- it would write over that run's history.json at the
+    first log line and its agent.pt on any exit. A plain resume into the same
+    directory carries the log forward, so that stays allowed.
+    """
+    torch = _torch()
+    if torch is None:
+        return
+    import tempfile
+    from pathlib import Path
+
+    from polytrack.learning.iqn import IQNAgent, IQNConfig
+
+    train = _train_script()
+    with tempfile.TemporaryDirectory() as folder:
+        source = Path(folder) / "source"
+        logged = Path(folder) / "logged"     # a banked run kept without its agent.pt
+        source.mkdir()
+        logged.mkdir()
+        path = str(source / "agent.pt")
+        IQNAgent(IQNConfig(obs_dim=8, hidden=32)).save(path)
+        (logged / "history.json").write_text("[]")
+
+        # --name is joined onto runs/, and an absolute one replaces it.
+        for taken in (source, logged):
+            args = _parse(
+                train, "--resume", path, "--weights-only", "--name", str(taken)
+            )
+            try:
+                train.run_directory(args)
+            except SystemExit as stopped:
+                assert "already holds a run" in str(stopped.code), stopped.code
+            else:
+                raise AssertionError(f"a --weights-only start was let into {taken}")
+
+        args = _parse(train, "--resume", path, "--name", str(source))
+        assert train.run_directory(args) == source
+        fresh = Path(folder) / "fresh"
+        args = _parse(train, "--resume", path, "--weights-only", "--name", str(fresh))
+        assert train.run_directory(args) == fresh
 
 
 if __name__ == "__main__":

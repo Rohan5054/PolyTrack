@@ -26,14 +26,14 @@ anything.
 ## Run it
 
 ```bash
-pip install -e .[learning]      # torch is training-only; the rest runs without
+pip install -e ".[learning]"    # torch is training-only; the rest runs without
 python tests/test_core.py       # 24 tests
 python tests/test_search.py     # 17 tests
 python tests/test_trackcode.py  # 12 tests
 python tests/test_wasm.py       # 19 tests
 python tests/test_recording.py  # 14 tests
 python tests/test_reference.py  # 18 tests
-python tests/test_learning.py   # 24 tests
+python tests/test_learning.py   # 33 tests
 python tests/test_spline.py     #  6 tests
 python tests/test_generator.py  # 12 tests
 python tests/test_pursuit.py    #  8 tests
@@ -42,7 +42,7 @@ python scripts/smoke_test.py
 python scripts/search_demo.py
 ```
 
-All 159 pass. Four of the suites reach for files that are not in the repo and
+All 168 pass. Four of the suites reach for files that are not in the repo and
 are stronger when they find them:
 
 * `test_trackcode.py` decodes every `.track` the game ships —
@@ -71,6 +71,20 @@ python scripts/train.py --smoke                                   # 90 s, plumbi
 python scripts/train.py --workers 6
 python scripts/train.py --workers 6 --track "Winter 5" --forward-only
 ```
+
+`--gamma` now defaults to `IQNConfig`'s **0.999**, the discount the agent was
+designed around. **The banked results were trained at 0.99**, the flag's old
+default, which always overrode the config's: the generalisation and Summer 1
+checkpoints record it, and for the Winter 5 and 300k-seed runs, whose
+checkpoints are gone, it is inferred from that default. Pass `--gamma 0.99` to
+reproduce one. A resume keeps the checkpoint's discount unless `--gamma` is
+given, and the collectors take theirs from `agent.config`, never the flag:
+`learn` reads no gamma of its own, so the collectors' n-step discount is the
+one the critic trains at. `CollectorConfig` has a gamma of its own defaulting
+to 0.99, so `test_the_collectors_discount_is_the_agents` checks what
+`collector_config_for` builds. `--lr` works the same way: unset means
+`IQNConfig`'s, a resume keeps the checkpoint's unless it is given, and given,
+it moves Adam's rate too.
 
 `tracks.npz` is the cache that makes collectors viable: deriving a reference line
 costs a full replay, so six workers rebuilding four lines each at launch would be
@@ -516,11 +530,20 @@ times; and the IQN training loop with parallel collectors.
 
    ```bash
    python scripts/train.py --library tracks.npz --track "Summer 1" \
-       --workers 6 --max-steps 150000 --seed 1 --name xfer-scratch-1
+       --workers 6 --max-steps 150000 --seed 1 --gamma 0.99 --log-every 5 \
+       --name xfer-hand-scratch-1
    python scripts/train.py --library tracks.npz --track "Summer 1" \
-       --workers 6 --max-steps 150000 --seed 1 --name xfer-pre-1 \
-       --resume runs/gen1/agent.pt --reset-optimiser
+       --workers 6 --max-steps 150000 --seed 1 --gamma 0.99 --log-every 5 \
+       --name xfer-hand-pre-1 --resume runs/gen1/agent.pt --weights-only
    ```
+
+   The banked Summer 1 numbers came from `scripts/transfer_experiment.py`, and
+   that is what reproduces them. The names above differ from its
+   `xfer-scratch-1` and `xfer-pre-1` on purpose: `train.py` writes into an
+   existing `runs/<name>`, and those directories hold the banked 150k
+   checkpoints. `--log-every 5` is the runner's too, since time to first lap is
+   read off the log: ~600 gradient steps of resolution, against ~2400 at the
+   default 20.
 
    `tracks.npz` does not ship -- it embeds the game's content, and
    `build_library.py` rebuilds it in three minutes. **The checkpoint does
@@ -574,10 +597,19 @@ times; and the IQN training loop with parallel collectors.
    same as checking that nothing is keyed on the step count.
 
    Weights-only loading therefore has to zero the counter too -- online weights
-   into both networks, fresh optimiser, `steps = 0`. `scripts/transfer_experiment.py`
-   on the `transfer-summer1` branch does this by writing its own init
-   checkpoint, which is why the Summer 1 runs are unaffected; the flag itself
-   still needs fixing. See `PAPER_PLAN.md` §2.2 on that branch.
+   into both networks, fresh optimiser, `steps = 0` -- and `--weights-only`
+   does exactly that, which is why the command above uses it rather than
+   `--reset-optimiser`; `test_loading_weights_only_starts_a_new_run_from_the_online_weights`
+   pins it. It starts a new run rather than a later sitting of one, so the
+   source run's `history.json`, clock and best laps stay behind, and it refuses
+   a `--name` whose directory already holds a run, which it would write over.
+   Both arms pass `--gamma 0.99`, the checkpoint's: without it the scratch arm
+   would get `IQNConfig`'s 0.999. The lr needs no flag here, since the
+   checkpoint's 5e-5 is `IQNConfig`'s, but a checkpoint with another one wants
+   `--lr` on both arms. `scripts/transfer_experiment.py` on the
+   `transfer-summer1` branch predates the flag and gets the same start by
+   writing its own init checkpoint, which is why the Summer 1 runs are
+   unaffected. See `PAPER_PLAN.md` §2.2 on that branch.
 
    Three seeds an arm. 150k steps is ~3.5 h, so the result is six runs and
    ~21 h; a one-seed 50k pilot costs 2.5 h and says whether the effect is
