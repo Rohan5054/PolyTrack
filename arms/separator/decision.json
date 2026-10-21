@@ -1,0 +1,7 @@
+{
+ "gamma_0.99_finished": true,
+ "gamma_0.999_finished": true,
+ "follow_up": "transfer",
+ "why": "both finished: it was the budget -- rerunning transfer at the same budget",
+ "decided": "2026-10-21 18:39:20"
+}

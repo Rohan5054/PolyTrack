@@ -1,0 +1,32 @@
+{
+ "arm": "scratch",
+ "seed": 2,
+ "gamma": 0.99,
+ "budget": 400000,
+ "command": [
+  "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+  "-u",
+  "/Users/vihaanc/Desktop/PolyTrack/PolyTrack/scripts/train.py",
+  "--library",
+  "/Users/vihaanc/Desktop/PolyTrack/PolyTrack/tracks.npz",
+  "--track",
+  "Summer 1",
+  "--workers",
+  "6",
+  "--max-steps",
+  "400000",
+  "--max-seconds",
+  "8729",
+  "--seed",
+  "2",
+  "--name",
+  "xlong-scratch-2",
+  "--lr",
+  "5e-05",
+  "--gamma",
+  "0.99",
+  "--log-every",
+  "5"
+ ],
+ "started": "2026-10-21 19:26:39"
+}
