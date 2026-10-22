@@ -17,19 +17,24 @@ Two checks, and they answer different questions:
   a generated lap the target is what produced it, so a PASS means deterministic
   reproduction -- the run is not an artifact of save/restore, splicing or a
   search bug. Neither case is the game accepting a submission.
-* **Substrate.** Hash the inputs all three arms share. If `tracks.npz` changes,
-  the Winter 5 reference line changed, and results before and after are not
-  comparable -- Arm 2's ranking is measured against that line.
+* **Substrate.** Hash the inputs all three arms share, in full, with
+  `scripts/substrate_hashes.py`. If `tracks.npz` changes, the Winter 5 reference
+  line changed, and results before and after are not comparable -- Arm 2's
+  ranking is measured against that line. An .npz whose file hash differs but
+  whose content digest matches holds the same arrays packed differently, and
+  passes with a note.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import substrate_hashes  # noqa: E402  -- the one definition of both digests
 
 #: (label, artifact, frames to pick when the file holds several runs)
 LAPS = [
@@ -46,12 +51,40 @@ LAPS = [
 #: Arms that have not produced a lap yet are reported, not counted as failures.
 OPTIONAL = {"arms/arm3-independent/winter_5.json"}
 
-#: Frozen for the duration of Phase 2. See EXPERIMENT.md.
+#: Full SHA-256 of each file, and for each .npz the content digest that
+#: `scripts/substrate_hashes.py` defines, as they stand on the M5 MacBook Air
+#: that ran the separator and transfer experiments on 21 October 2026 and the
+#: ten-lap acceptance gate.
+#:
+#: Until then the frozen values were 16-character prefixes:
+#:   polytrack_physics.wasm  d4ef02676973d41a
+#:   geometry.npz            6fb32e3b719811dc
+#:   tracks.npz              5cdc6a530cf527c7
+#:   records.json            f87af733f13d7b0f
+#: The generalisation and Winter 5 results were produced on a Windows laptop,
+#: before 21 October 2026, against those files. The 21 October runs and the
+#: ten-lap gate were produced on the M5, against the files below. The wasm's
+#: old prefix is the first 16 characters of its full hash, so it is the same
+#: module. The old records.json prefix is the eight-lap file as checked out
+#: with Windows (CRLF) line endings, which .gitattributes now prevents; the
+#: file has since gained two laps. Run `scripts/substrate_hashes.py` on the
+#: Windows laptop to see whether geometry.npz and tracks.npz differ in content
+#: or only in packing.
 SUBSTRATE = {
-    "polytrack_physics.wasm": "d4ef02676973d41a",
-    "geometry.npz": "6fb32e3b719811dc",
-    "tracks.npz": "5cdc6a530cf527c7",
-    "records.json": "f87af733f13d7b0f",
+    "polytrack_physics.wasm": {
+        "sha256": "d4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e",
+    },
+    "geometry.npz": {
+        "sha256": "ccbd8f1adf7315cd9ea25c18e41b2264cf9c16ad103be8f1cd64643003cae0e5",
+        "content_sha256": "eda58e383d6d6199529c880d7dbfdcc1568b76889bac74b45cbbe978c00378dc",
+    },
+    "tracks.npz": {
+        "sha256": "710d3113592b093b87fadd3cda021de90875b5245f63ac145fed6ff714945bcc",
+        "content_sha256": "400311c6ce6dfc5c374de3b46c35af9d905ec4784d9ca5cf8ace4cf38a819dd5",
+    },
+    "records.json": {
+        "sha256": "8594b39c32fd540e38ab333e289bf9440b432dc8b2c6ecf6502e570418ed1555",
+    },
 }
 
 
@@ -95,24 +128,42 @@ def main() -> int:
               f"/{result.expected_checkpoints})")
         failures += not result.passed
 
-    print(f"\n  {'substrate':<26}{'sha256':<20}status")
+    print(f"\n  {'substrate':<24}{'sha256':<66}status")
+    repacked = []
+    actual = substrate_hashes.substrate()
     for name, expected in SUBSTRATE.items():
-        path = Path(name)
-        if not path.exists():
-            print(f"  {name:<26}{'--':<20}MISSING")
+        found = actual.get(name)
+        if found is None:
+            print(f"  {name:<24}{'--':<66}MISSING")
             failures += 1
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
-        ok = digest == expected
-        print(f"  {name:<26}{digest:<20}"
-              + ("frozen" if ok else f"CHANGED, expected {expected}"))
-        failures += not ok
+        if found["sha256"] == expected["sha256"]:
+            status = "frozen"
+        elif (
+            "content_sha256" in expected
+            and found.get("content_sha256") == expected["content_sha256"]
+        ):
+            status = "content matches, file differs"
+            repacked.append(name)
+        else:
+            status = f"CHANGED, expected {expected['sha256']}"
+            if "content_sha256" in expected:
+                status += (f"\n  {'':<24}content {found['content_sha256']}"
+                           f"  expected {expected['content_sha256']}")
+            failures += 1
+        print(f"  {name:<24}{found['sha256']:<66}{status}")
 
     if failures:
         print(f"\n  {failures} check(s) failed. Numbers quoted from this repo are "
               "not currently\n  reproducible; do not report them until this is "
               "green.\n")
         return 1
+    if repacked:
+        hold, were = ("holds", "was") if len(repacked) == 1 else ("hold", "were")
+        print(f"\n  Note: {' and '.join(repacked)} {hold} the frozen arrays but "
+              f"{were} written differently\n  (an .npz is a zip archive: "
+              "timestamps, compression and member order vary\n  with whatever "
+              "wrote it). The data is the same, so this passes.")
     print("\n  All laps reproduce their finish frame. Substrate unchanged.\n")
     return 0
 
