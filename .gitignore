@@ -14,4 +14,10 @@ tracks_18786.npz
 # and only usable with geometry.npz, which is not in the repo either.
 tracks_generated.npz
 tracks_heldout.npz
+
+# Any other track library: a side build such as tracks_8lap.npz embeds the
+# game's track codes just as tracks.npz does.
+tracks*.npz
+
+# The client extracted from the game's app.asar: Kodub's content, local only.
 game/
