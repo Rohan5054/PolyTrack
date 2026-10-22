@@ -14,3 +14,4 @@ tracks_18786.npz
 # and only usable with geometry.npz, which is not in the repo either.
 tracks_generated.npz
 tracks_heldout.npz
+game/
