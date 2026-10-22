@@ -4,7 +4,7 @@
     python tools/export_verify_payload.py -o runs/client_check.json
 
 `polytrack/verify.py` mirrors the game's `Verify` loop, and the acceptance gate
-says that mirror reproduces eight real recordings frame-exactly. That validates
+says that mirror reproduces ten real recordings frame-exactly. That validates
 the *simulator*. It does not, on its own, validate a lap this project generated:
 for those the target frame is what our own search claimed, so a PASS means
 "these inputs reproduce that frame **here**", and the step to "the game agrees"

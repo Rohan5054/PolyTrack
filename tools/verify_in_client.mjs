@@ -4,7 +4,7 @@
 //   node tools/verify_in_client.mjs --game ../game-extracted \
 //        --payload runs/client_check.json
 //
-// `polytrack/verify.py` mirrors the client's Verify loop and reproduces eight
+// `polytrack/verify.py` mirrors the client's Verify loop and reproduces ten
 // real recordings frame-exactly, which validates the simulator. For a lap this
 // project *generated* the target frame is our own search's claim, so our PASS
 // means "these inputs reproduce that frame here" and the step to "the game
