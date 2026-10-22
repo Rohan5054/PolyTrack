@@ -179,7 +179,7 @@ def test_every_shipped_track_decodes():
     if not root:
         return
     current = legacy = 0
-    for path in sorted(glob.glob(os.path.join(root, "*", "*.track"))):
+    for path in sorted(glob.glob(os.path.join(root, "**", "*.track"), recursive=True)):
         text = open(path, encoding="utf-8").read().strip()
         if not text.startswith(PREFIX):
             legacy += 1  # PolyTrack1 and older; see the module docstring.
@@ -240,7 +240,7 @@ def test_every_shipped_track_survives_a_re_encode():
     if not root:
         return
     checked = 0
-    for path in sorted(glob.glob(os.path.join(root, "*", "*.track"))):
+    for path in sorted(glob.glob(os.path.join(root, "**", "*.track"), recursive=True)):
         text = open(path, encoding="utf-8").read().strip()
         if not text.startswith(PREFIX):
             continue  # PolyTrack1 and older
