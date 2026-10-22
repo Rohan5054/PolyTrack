@@ -37,7 +37,7 @@ Seeds 1-2 ran from 17:02; seed 3 ran in a second invocation from 21:13.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `sep-g099-1` | scratch | 1 | 0.99 | 121k | 427 | 52k | 69% | 65% | 94% | 10 | 100% | 24.652 |
 | `sep-g0999-1` | scratch | 1 | 0.999 | 344k | 1 | 128k | 36% | 38% | 72% | 0 | 66% | 45.048 |
-| `xlong-pre-1` | pretrained | 1 | 0.99 | 284k | 166 | 172k | 38% | 84% | 85% | 5 | 90% | 26.084 |
+| `xlong-pre-1` | pretrained | 1 | 0.99 | 284k | 166 | 172k | 38% | 84% | 85% | 5 | 90% | 25.988 |
 | `xlong-scratch-2` | scratch | 2 | 0.99 | 234k | 16 | 242k | 32% | 67% | 84% | 0 | 44% | 28.010 |
 | `xlong-pre-2` | pretrained | 2 | 0.99 | 246k | 165 | 132k | 76% | 93% | 65% | 8 | 100% | 24.292 |
 | `xlong-scratch-3` | scratch | 3 | 0.99 | 252k | 71 | 198k | 33% | 65% | 82% | 2 | 73% | 25.092 |
@@ -48,7 +48,7 @@ Columns:
 - **episodes finished:** training episodes that finished, over the whole run.
 - **50% of lap** and **@150k / @300k / @400k:** the near-greedy collector's share of the lap, averaged over ±2.5k steps.
 - **greedy laps** and **greedy median:** from stage 3.
-- **best lap:** the fastest training episode, in seconds. The human reference is 23.805.
+- **best lap:** the fastest training episode, in seconds, as kept in each run's `best_summer_1.json`. The human reference is 23.805. `xlong-pre-1`'s 25.988 came at 399,808 gradient steps, after its last 5 s log row at 399,424, so `history.json` and `summary.json`, which take the best lap from that row, still say 26.084.
 
 ### 1. The budget
 
@@ -78,7 +78,7 @@ them. It is not enough to make a general claim about the discount.
 | @300k | 65% / 67% / 65% | 84% / 93% / 98% |
 | greedy laps /10 | 10 / 0 / 2 | 5 / 8 / 1 |
 | episodes finished | 427 / 16 / 71 | 166 / 165 / 157 |
-| best lap | 24.652 / 28.010 / 25.092 | 26.084 / 24.292 / 24.833 |
+| best lap | 24.652 / 28.010 / 25.092 | 25.988 / 24.292 / 24.833 |
 
 - **The primary metric goes against transfer.** The pretrained run reached its
   first lap later in every seed pair.
@@ -141,6 +141,7 @@ Sections are read off the reference line's height profile, as in
 | `<run>/train.log` | `train.py`'s output, which records the gamma and lr each run used |
 | `<run>/transfer.json` | arm, seed, gamma, budget, exact command, start time |
 | `<run>/transfer.done` | exit code, finish time, steps reached |
+| `<run>/best_summer_1.json` | the run's fastest lap: track, finish frame, input recording, gradient steps; `scripts/verify_baselines.py` replays it |
 | `decision.json` | stage 1's outcome and the follow-up it chose |
 | `summary.json` | every metric in the tables above, per run |
 | `where_attempts_end.jsonl` | stage 3's attempts, from `arms/transfer/where_attempts_end.py` |

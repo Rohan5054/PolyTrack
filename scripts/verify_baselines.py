@@ -11,12 +11,13 @@ same artifacts.
 
 Two checks, and they answer different questions:
 
-* **Laps.** Replay each recording on a fresh backend and confirm it reproduces
-  its own finish frame with every checkpoint. For a human record the target frame
-  comes from the game's own storage, so this is the Stage 0 acceptance gate. For
-  a generated lap the target is what produced it, so a PASS means deterministic
-  reproduction -- the run is not an artifact of save/restore, splicing or a
-  search bug. Neither case is the game accepting a submission.
+* **Laps.** Replay each recording on a fresh backend, on its own track, and
+  confirm it reproduces its own finish frame with every checkpoint. For a human
+  record the target frame comes from the game's own storage, so this is the
+  Stage 0 acceptance gate. For a generated lap the target is what produced it,
+  so a PASS means deterministic reproduction -- the run is not an artifact of
+  save/restore, splicing or a search bug. Neither case is the game accepting a
+  submission.
 * **Substrate.** Hash the inputs all three arms share, in full, with
   `scripts/substrate_hashes.py`. If `tracks.npz` changes, the Winter 5 reference
   line changed, and results before and after are not comparable -- Arm 2's
@@ -36,9 +37,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import substrate_hashes  # noqa: E402  -- the one definition of both digests
 
-#: (label, artifact, frames to pick when the file holds several runs)
+#: (label, artifact relative to the repo root, frames to pick when the file
+#: holds several runs). A lap file names its track; a records.json entry is
+#: matched to its track by id.
 LAPS = [
     ("human PB", "records.json", 19025),
+    ("human best", "records.json", 18809),
     ("Arm 1  policy alone", "arms/arm1-policy/winter_5.json", None),
     ("  lineage: training harvest",
      "arms/arm2-search/lineage/01_training_harvest_19249.json", None),
@@ -46,6 +50,16 @@ LAPS = [
      "arms/arm2-search/lineage/02_beam_19245.json", None),
     ("Arm 2  policy + guided beam", "arms/arm2-search/winter_5.json", None),
     ("Arm 3  independent", "arms/arm3-independent/winter_5.json", None),
+    # The best lap of each 400k Summer 1 run, 21 October 2026 (arms/separator).
+    ("scratch 1, gamma 0.99",
+     "arms/separator/sep-g099-1/best_summer_1.json", None),
+    ("scratch 1, gamma 0.999",
+     "arms/separator/sep-g0999-1/best_summer_1.json", None),
+    ("pretrained 1", "arms/separator/xlong-pre-1/best_summer_1.json", None),
+    ("pretrained 2", "arms/separator/xlong-pre-2/best_summer_1.json", None),
+    ("pretrained 3", "arms/separator/xlong-pre-3/best_summer_1.json", None),
+    ("scratch 2", "arms/separator/xlong-scratch-2/best_summer_1.json", None),
+    ("scratch 3", "arms/separator/xlong-scratch-3/best_summer_1.json", None),
 ]
 
 #: Arms that have not produced a lap yet are reported, not counted as failures.
@@ -62,8 +76,9 @@ OPTIONAL = {"arms/arm3-independent/winter_5.json"}
 #:   tracks.npz              5cdc6a530cf527c7
 #:   records.json            f87af733f13d7b0f
 #: The generalisation and Winter 5 results were produced on a Windows laptop,
-#: before 21 October 2026, against those files. The 21 October runs and the
-#: ten-lap gate were produced on the M5, against the files below. The wasm's
+#: before 21 October 2026, against those files. The 20 and 21 October Summer 1
+#: runs (arms/transfer, arms/separator) and the ten-lap gate were produced on
+#: the M5, against the files below. The wasm's
 #: old prefix is the first 16 characters of its full hash, so it is the same
 #: module. The old records.json prefix is the eight-lap file as checked out
 #: with Windows (CRLF) line endings, which .gitattributes now prevents; the
@@ -95,27 +110,37 @@ def main() -> int:
     from polytrack.recording import Recording
     from polytrack.verify import verify
 
-    entry = TrackLibrary.load("tracks.npz").by_name("Winter 5")
+    # Everything from the repo root, as the substrate check reads it, so the
+    # files replayed are the files hashed wherever this is run from.
+    root = substrate_hashes.ROOT
+    library = TrackLibrary.load(root / "tracks.npz")
+    by_id = {entry.track_code().track_id: entry for entry in library}
     assets = GeometryAssets.load()
 
-    print(f"\n  {'artifact':<34}{'frames':>8}   gate")
+    print(f"\n  {'artifact':<34}{'track':<10}{'frames':>8}   gate")
     failures = 0
     for label, path, pick in LAPS:
-        blob = Path(path)
+        blob = root / path
         if not blob.exists():
             state = (
                 "attempted, did not finish -- see the arm's README"
                 if path in OPTIONAL else f"MISSING {path}"
             )
-            print(f"  {label:<34}{'--':>8}   {state}")
+            print(f"  {label:<34}{'':<10}{'--':>8}   {state}")
             failures += path not in OPTIONAL
             continue
         data = json.loads(blob.read_text())
         if isinstance(data, list):  # records.json holds every track
             chosen = next(r for r in data if r["frames"] == pick)
             serialised, frames = chosen["recording"], pick
+            entry = by_id.get(chosen["track_id"])
         else:
             serialised, frames = data["recording"], int(data["frames"])
+            entry = next((e for e in library if e.name == data["track"]), None)
+        if entry is None:
+            print(f"  {label:<34}{'':<10}{frames:>8}   MISSING its track in tracks.npz")
+            failures += 1
+            continue
 
         result = verify(
             WasmPhysics(entry.track_code(), assets=assets),
@@ -123,7 +148,7 @@ def main() -> int:
             frames,
         )
         verdict = "PASS" if result.passed else "FAIL"
-        print(f"  {label:<34}{frames:>8}   {verdict} "
+        print(f"  {label:<34}{entry.name:<10}{frames:>8}   {verdict} "
               f"(reached {result.frames}, cp {result.checkpoints}"
               f"/{result.expected_checkpoints})")
         failures += not result.passed

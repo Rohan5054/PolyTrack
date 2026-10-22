@@ -162,7 +162,7 @@ zero.
 | first lap, mean | **202k** | 279k |
 | share of lap at 300k | 65 / 67 / 65 % | **84 / 93 / 98 %** |
 | greedy laps of 10, per seed | 10 / 0 / 2 | 5 / 8 / 1 |
-| best lap | 24.652 / 28.010 / 25.092 | 26.084 / **24.292** / 24.833 |
+| best lap | 24.652 / 28.010 / 25.092 | 25.988 / **24.292** / 24.833 |
 
 * The **primary metric goes against transfer**: the pretrained arm reached its
   first lap later in all three pairs.
