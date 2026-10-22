@@ -12,9 +12,9 @@ Trackmania and Gran Turismo racing agents — the short version is in
 
 ## First thing to do
 
-```bash
-git init && git add -A && git commit -m "Initial import from chat session"
-```
+Commit before you change anything. The repo is under git now; stage files by
+name rather than with `git add -A`, which would sweep in any untracked local
+file the ignore rules do not cover.
 
 This repo was built in a chat sandbox with **no version control**, and that
 caused a real problem: work from an earlier part of the session reappeared
@@ -71,6 +71,11 @@ python scripts/train.py --smoke                                   # 90 s, plumbi
 python scripts/train.py --workers 6
 python scripts/train.py --workers 6 --track "Winter 5" --forward-only
 ```
+
+Run on the current `records.json`, `build_library.py` does not reproduce the
+frozen `tracks.npz`: Winter 5's entry follows the faster 18.809 lap and Winter 4
+is added. The frozen file is built from the eight-lap `records.json` of
+`47808ad`; the command is in the README under *Reproducing this*.
 
 `--gamma` now defaults to `IQNConfig`'s **0.999**, the discount the agent was
 designed around. **The banked results were trained at 0.99**, the flag's old
@@ -139,9 +144,9 @@ tune reward coefficients against it beyond checking that learning occurs.
 
 `WasmPhysics` now drives the real module and everything below the acceptance
 gate works: the car spawns where the client would put it, drives, collides,
-saves and restores, and two fresh instances agree byte for byte. **What is still
-unproven is whether it matches the actual game.** Until the gate below passes,
-treat every number from it as provisional too.
+saves and restores, and two fresh instances agree byte for byte. **Whether it
+matches the actual game is what the acceptance gate below tests**, and it passes,
+10 of 10.
 
 How the backend was built, and how to rebuild the inputs it needs:
 
@@ -214,8 +219,8 @@ recompressed.
 5, Desert 3, Winter 5 and Winter 4 -- played in the game, read out of its local
 storage, replay here and land on their recorded finish frame to the millisecond,
 the longest 61,428 frames. The two newest, Winter 5 18.809 and Winter 4 19.980,
-were played by the author and added to records.json on 21 October 2026. Stage 0
-is complete.
+were played by the author and confirmed human on 21 October 2026. Stage 0 is
+complete.
 
 An oracle is a recording *paired with the finish frame the real game recorded
 for it*. A recording alone will not do: it ends when the last key is released,
@@ -225,9 +230,13 @@ Get one by playing a single track. On a personal best the client stores both in
 local storage under `polytrack_v5_prod_record_<slot>_default_<trackId>`:
 
 ```bash
-python tools/extract_records.py -o records.json
-POLYTRACK_TRACKS=path/to/tracks python scripts/run_gate.py records.json
+python tools/extract_records.py -o runs/my_records.json
+POLYTRACK_TRACKS=path/to/tracks python scripts/run_gate.py runs/my_records.json
 ```
+
+Not `-o records.json`: that file is committed, its SHA-256 is frozen in
+`scripts/verify_baselines.py`, and the extractor would replace its laps with
+yours. Add new laps to it deliberately.
 
 Any track, any time; play more of them and the evidence gets stronger. Do not
 reach for the leaderboard API — `vps.kodub.com`
@@ -381,10 +390,12 @@ tug of war with lap time needing a coefficient nobody can tune.
 `IQNConfig.allowed_actions` is that mechanism, and `--forward-only` is the one
 use of it so far. It is a *per-track* claim and the evidence is per track.
 Measured over `records.json`: the 19.025 Winter 5 lap holds throttle for
-**100.0%** of its 19,025 frames and never brakes; the 21.899 lap on the same
-track lifts for 12% and is 2.9 s slower. Every other track brakes for 8–21% of
-the lap, so forward-only would make them unfinishable. Only set it on a run that
-trains one track — `train.py` warns if you do otherwise.
+**100.0%** of its 19,025 frames and never brakes, and so do the faster 18.809
+Winter 5 lap and the 19.980 Winter 4 lap; the 21.899 lap on Winter 5 lifts for
+12%, brakes for 0.8% and is 2.9 s slower. The Desert 3, Summer 1 and Summer 5
+laps brake for 8–21% of the lap, so forward-only would make those tracks
+unfinishable. Only set it on a run that trains one track — `train.py` warns if
+you do otherwise.
 
 Restricting means masking in **three** places, and the third is the one that
 fails silently: the acting argmax, the epsilon-random branch, and the Double-Q
@@ -524,11 +535,13 @@ times; and the IQN training loop with parallel collectors.
 3. ~~**Policy-guided search**~~ — done. `BeamSearch(prior=..., top_k=...)` and
    `scripts/search_run.py`. See below.
 
-4. **Does the representation transfer?** — designed, not run, and the best
-   value per hour left on the list: it can add a claim, where the ablations can
-   only defend numbers that already exist. Fine-tune the generated-track policy
-   on one official track against a from-scratch control and compare gradient
-   steps to the first completed lap.
+4. **Does the representation transfer?** — run, on Summer 1: three seed pairs
+   at 150k on 20 October (`arms/transfer/`, inconclusive at that budget, since no
+   run in either arm lapped) and three at 400k on 21 October (`arms/separator/`,
+   every run laps and the result is mixed: the pretrained arm reaches its first
+   lap later in all three pairs but is further round at 300k in all three). The
+   design: fine-tune the generated-track policy on one official track against a
+   from-scratch control and compare gradient steps to the first completed lap.
 
    ```bash
    python scripts/train.py --library tracks.npz --track "Summer 1" \
@@ -539,16 +552,18 @@ times; and the IQN training loop with parallel collectors.
        --name xfer-hand-pre-1 --resume runs/gen1/agent.pt --weights-only
    ```
 
-   The banked Summer 1 numbers came from `scripts/transfer_experiment.py`, and
-   that is what reproduces them. The names above differ from its
+   The banked Summer 1 numbers came from `scripts/transfer_experiment.py` (150k)
+   and `scripts/separator_experiment.py` (400k), and those runners are what
+   reproduce them. The names above differ from the former's
    `xfer-scratch-1` and `xfer-pre-1` on purpose: `train.py` writes into an
    existing `runs/<name>`, and those directories hold the banked 150k
    checkpoints. `--log-every 5` is the runner's too, since time to first lap is
    read off the log: ~600 gradient steps of resolution, against ~2400 at the
    default 20.
 
-   `tracks.npz` does not ship -- it embeds the game's content, and
-   `build_library.py` rebuilds it in three minutes. **The checkpoint does
+   `tracks.npz` does not ship -- it embeds the game's content. `build_library.py`
+   rebuilds it in three minutes, from the eight-lap `records.json` of `47808ad`
+   rather than the current one (README, *Reproducing this*). **The checkpoint does
    ship**, at `arms/generalisation/agent.pt`, and the command above reads the
    same weights from `runs/gen1/` only because that is where training wrote
    them.
@@ -613,9 +628,11 @@ times; and the IQN training loop with parallel collectors.
    writing its own init checkpoint, which is why the Summer 1 runs are
    unaffected. See `PAPER_PLAN.md` §2.2 on that branch.
 
-   Three seeds an arm. 150k steps is ~3.5 h, so the result is six runs and
-   ~21 h; a one-seed 50k pilot costs 2.5 h and says whether the effect is
-   worth the rest. Read all three outcomes as results: sooner is positive
+   Three seeds an arm. 150k steps turned out too short, since no run in either
+   arm lapped, and 400k was enough for every run: about 49 minutes each on the
+   M5 Air, where the plan had costed 150k at ~3.5 h on the Windows laptop's
+   throughput. Read all three
+   outcomes as results: sooner is positive
    transfer; no difference is consistent with the support measurement rather
    than contradicting it, since features that far out of band may simply carry
    no information; and *worse* is negative transfer, the most interesting of

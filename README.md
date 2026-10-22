@@ -9,20 +9,24 @@ last tenths.**
 **Three independently seeded policies trained on 48 generated tracks each
 finish every one of 16 tracks they have never seen, at 97.9% ± 0.6% of
 attempts**, with no measurable generalisation gap against the tracks they
-trained on, beating a scripted baseline on all 16. It finishes none of
-the four human-designed official tracks — see
-[Generalisation](#generalisation-the-result-this-was-built-for).
+trained on, beating a scripted baseline on all 16. Zero-shot, it finishes none
+of the four human-designed official tracks it was tested on — see
+[Generalisation](#generalisation-the-result-this-was-built-for). Trained on
+Summer 1 instead, all seven 400k-step runs lap it, the best in 24.292 s against
+the best human lap in `records.json`, 23.805, 2.0% off — see
+[arms/separator/](arms/separator/).
 
 **Winter 5, 18.786 s** — 23 ms faster than the best human lap in `records.json`
-(18.809, played by the author and added on 21 October 2026), 239 ms faster than
-the earlier human reference this project was first measured against (19.025),
-and 636 ms faster than the same policy driving without search (19.422). It
+(18.809, played by the author and confirmed human on 21 October 2026), 239 ms
+faster than the earlier human reference this project was first measured against
+(19.025), and 636 ms faster than the policy driving without search (19.422, from
+the 717,248-step checkpoint; the search was guided by the 801,472-step one). It
 reproduces its finish frame exactly on a fresh backend, and **the game's own
 simulation worker agrees**.
 
 | | Winter 5 | verified by |
 |---|---|---|
-| best human lap in `records.json` (the author's, added 21 October 2026) | 18.809 | the game's own storage (external oracle) |
+| best human lap in `records.json` (the author's, confirmed human 21 October 2026) | 18.809 | the game's own storage (external oracle) |
 | earlier human reference | 19.025 | the game's own storage (external oracle) |
 | Arm 1 — policy alone | 19.422 | gate + client worker |
 | **Arm 2 — policy + guided beam** | **18.786** | gate + client worker |
@@ -92,8 +96,8 @@ It passes on ten real runs across five tracks — Summer 1, Summer 5, Desert 3,
 Winter 5 and Winter 4 — the longest 61,428 frames, each landing on its recorded
 finish frame to the millisecond. Those runs were played in the game and read out
 of its local storage; the two newest, Winter 5 18.809 and Winter 4 19.980, were
-played by the author and added to `records.json` on 21 October 2026. The game
-implements the same check itself, and `polytrack/verify.py` mirrors its loop.
+played by the author and confirmed human on 21 October 2026. The game implements
+the same check itself, and `polytrack/verify.py` mirrors its loop.
 
 ```bash
 python tools/extract_records.py -o records.json
@@ -218,6 +222,11 @@ python scripts/train.py --smoke                                   # 90 s
 python scripts/train.py --workers 6 --track "Winter 5" --forward-only
 ```
 
+Run on the current `records.json`, `build_library.py` does not reproduce the
+frozen `tracks.npz`: Winter 5's entry follows the faster 18.809 lap and Winter 4
+is added. To rebuild the frozen file, use the command under
+[Reproducing this](#reproducing-this).
+
 `--gamma` defaults to the agent's own 0.999. The results in this README used
 the flag's old default of 0.99, which the 1.22M-step generalisation checkpoint
 records (for the Winter 5 and 300k-seed runs, whose checkpoints are gone, it is
@@ -272,9 +281,10 @@ The corollary: **encode certainty as a constraint, uncertainty as a reward.**
 Since no term may be negative, "stop doing X" cannot be expressed as a penalty at
 all — so when you are confident an action is never right, remove it from the
 action space. `--forward-only` is the one use so far, and it is a *per-track*
-claim with per-track evidence: the 19.025 Winter 5 lap holds throttle for 100.0%
-of its frames and never brakes, while every other track in `records.json` brakes
-for 8–21% of the lap.
+claim with per-track evidence. Measured over `records.json`: the 19.025 and
+18.809 Winter 5 laps hold throttle for 100.0% of their frames and never brake,
+and so does the 19.980 Winter 4 lap; the 21.899 Winter 5 lap brakes for 0.8%;
+the Desert 3, Summer 1 and Summer 5 laps brake for 8–21%.
 
 ## Search
 

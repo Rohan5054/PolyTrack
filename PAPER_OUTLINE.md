@@ -15,7 +15,7 @@ and no others.
 
 | | claim | strength |
 |---|---|---|
-| **C1** | A faithful RL environment can be built from a shipped game binary by hosting its own physics and capturing rather than reimplementing its geometry, and the result is verifiable to frame-exactness against two independent oracles. | **Strong.** 8 of 8 (10 of 10 available), two oracles, one of them the game's own verifier. |
+| **C1** | A faithful RL environment can be built from a shipped game binary by hosting its own physics and capturing rather than reimplementing its geometry, and the result is verifiable to frame-exactness against two independent oracles. | **Strong.** 10 of 10, two oracles, one of them the game's own verifier. |
 | **C2** | A procedural generator writes track codes the game loads and yields each track's route by construction, retiring the human-lap bootstrap. | **Strong.** 31/31 re-encode, 24/24 drivable. |
 | **C3** | A policy trained on generated tracks generalises within that distribution with no measurable train/held-out gap. | **Strong.** Three seeds, 97.9 ± 0.6 %, 94 % vs 92 %. |
 | **C4** | Transfer failure to human-designed tracks is out-of-distribution distance, measured in observation space, and the measurement predicts *where* a policy fails and not merely that it does. | **Medium.** Control arm and confound arm both run; the per-section prediction is a post-hoc reading, not a pre-registered test. |
@@ -35,8 +35,8 @@ Two additions:
   laps on 21 October, both played by the author with the game's own finish
   frame: Winter 5 **18809** and track `7d134c93` **19980**. The second is a
   track the gate has never seen, taking the corpus from four tracks to five.
-  **Neither has been run through `scripts/run_gate.py` yet** — this is the
-  cheapest strengthening of the paper's central claim available, and §8 lists it.
+  **Both now pass `scripts/run_gate.py`, 10 of 10** — the cheapest
+  strengthening of the paper's central claim available.
 * **Throughput figures exist for a second machine.** §3.6 and §8.6 quote the
   Windows laptop (six collectors, 50-80 transitions/s). The M5 Air gives
   190-230 transitions/s and 115-144 gradient steps/s, with a fanless throttle to
@@ -128,9 +128,11 @@ Keep the three observations, which matter more than the time:
   projected onto a fixed block grid reaches 26 m at 50 ms, 349 m at 25 ms,
   477 m at 10 ms, 468 m at 5 ms of 1747 m.
 
-Also keep: `--forward-only` is justified per-track, and now by two laps —
-**both** Winter 5 human laps hold throttle 100.0 % of frames and never brake,
-including the faster one. Every other track in `records.json` brakes 8-21 %.
+Also keep: `--forward-only` is justified per-track, and now by two laps — the
+19.025 and the faster 18.809 Winter 5 laps both hold throttle 100.0 % of frames
+and never brake; the third Winter 5 lap, 21.899, brakes 0.8 %. The 19.980
+Winter 4 lap never brakes either, while Desert 3, Summer 1 and Summer 5 brake
+8-21 %.
 
 ### 6.4 Official tracks are learnable — NEW SECTION, and it reframes 6.1
 
