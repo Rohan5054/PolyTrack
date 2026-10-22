@@ -1,0 +1,5 @@
+# JSON is hashed (records.json is part of the frozen substrate in
+# scripts/verify_baselines.py), so its bytes must not depend on the platform
+# that checked it out. Without this, git on Windows with core.autocrlf would
+# write CRLF and the same file would hash differently there.
+*.json text eol=lf
