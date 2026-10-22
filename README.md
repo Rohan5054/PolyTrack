@@ -13,14 +13,16 @@ trained on, beating a scripted baseline on all 16. It finishes none of
 the four human-designed official tracks — see
 [Generalisation](#generalisation-the-result-this-was-built-for).
 
-**Winter 5, 18.786 s** — 239 ms faster than the human personal best this project
-was measured against (19.025), and 636 ms faster than the same policy driving
-without search (19.422). It reproduces its finish frame exactly on a fresh
-backend, and **the game's own simulation worker agrees**.
+**Winter 5, 18.786 s** — 23 ms faster than the best human lap (18.809, played by
+the author on 21 October 2026), 239 ms faster than the earlier human reference
+this project was first measured against (19.025), and 636 ms faster than the same
+policy driving without search (19.422). It reproduces its finish frame exactly on
+a fresh backend, and **the game's own simulation worker agrees**.
 
 | | Winter 5 | verified by |
 |---|---|---|
-| human PB | 19.025 | the game's own storage (external oracle) |
+| best human lap (the author, 21 October 2026) | 18.809 | the game's own storage (external oracle) |
+| earlier human reference | 19.025 | the game's own storage (external oracle) |
 | Arm 1 — policy alone | 19.422 | gate + client worker |
 | **Arm 2 — policy + guided beam** | **18.786** | gate + client worker |
 | Arm 3 — continuous optimisation | did not finish, 1089 m of 1747 | n/a — no finish frame |
@@ -41,8 +43,8 @@ That is one track. See [What this does not show](#what-this-does-not-show).
 | Reward function | Done — every term non-negative, see below |
 | Gymnasium environment | Done — runs on real physics |
 | Reference stand-in physics | Retained for tests only |
-| **Real WASM physics backend** | **Done. Acceptance gate passes, 8/8** |
-| **Verification by the client's own worker** | **Done — 3/3 laps PASS** |
+| **Real WASM physics backend** | **Done. Acceptance gate passes, 10/10** |
+| **Verification by the client's own worker** | **Done — 4/4 laps PASS** |
 | Reference lines from real runs | Done |
 | Search layer (beam / CEM / refinement) | Done — beat the human PB |
 | Policy-guided search | Done — this is where 18.786 came from |
@@ -85,14 +87,42 @@ The gate was: **replay a known recording through the backend and reproduce its
 finish frame exactly.** Not approximately — a simulator 0.01% off finishes a
 40-second run four milliseconds early.
 
-It passes on eight real runs across four tracks, up to a 61,428-tick run, each
-landing on its recorded finish frame to the millisecond. Those runs were played
-in the game and read out of its local storage; the game implements the same
-check itself, and `polytrack/verify.py` mirrors its loop.
+It passes on ten real runs across five tracks — Summer 1, Summer 5, Desert 3,
+Winter 5 and Winter 4 — the longest 61,428 frames, each landing on its recorded
+finish frame to the millisecond. Those runs were played in the game and read out
+of its local storage; the two newest, Winter 5 18.809 and Winter 4 19.980, were
+played by the author on 21 October 2026. The game implements the same check
+itself, and `polytrack/verify.py` mirrors its loop.
 
 ```bash
 python tools/extract_records.py -o records.json
 POLYTRACK_TRACKS=path/to/tracks python scripts/run_gate.py records.json
+```
+
+### Reproduce the gate table
+
+From the repo root, against the committed `records.json`:
+
+```bash
+POLYTRACK_TRACKS=game/tracks python scripts/run_gate.py records.json
+```
+
+It needs:
+
+- `polytrack_physics.wasm` and `geometry.npz` in the repo root, matching the
+  hashes in [Reproducing this](#reproducing-this)
+  (`POLYTRACK_WASM` / `POLYTRACK_GEOMETRY` can point elsewhere);
+- the game's `.track` files, in the directory `POLYTRACK_TRACKS` names
+  (`game/tracks` above);
+- Python 3.11 or later, with `numpy` and `wasmtime` (`pip install -e .`
+  installs both).
+
+Do not run `tools/extract_records.py -o records.json` first: it replaces the
+committed laps with the ones in your own game's storage. The command replays all
+ten human laps, prints each one's reproduced finish frame, and ends with:
+
+```
+10 passed, 0 failed, 0 skipped
 ```
 
 ### The client's own worker verifies our laps too
@@ -113,7 +143,7 @@ node tools/verify_in_client.mjs --game path/to/extracted/app \
      --payload runs/client_check.json
 ```
 
-19025, 19422 and 18786 all PASS. The worker decodes the track with its own
+19025, 18809, 19422 and 18786 all PASS. The worker decodes the track with its own
 `fromSaveString` and deserialises the recording with its own `deserialize`, so
 this independently exercises `trackcode.py` and `recording.py` alongside the
 `wasm.py` call sequence — everything written here between a lap file and the
@@ -622,8 +652,11 @@ Stated plainly, because the result above is easy to over-read:
   measurement of what that costs.
 - **The policy alone is slower than the human.** 19.422 against 19.025. Every
   gain came from search, and the search was steered by a human racing line.
-- **n = 1 everywhere.** No seeds, no repeats, no error bars. The three-arm
-  comparison varies several things at once and two of its arms share an author.
+- **Few seeds.** The generalisation result has three seeds and the 21 October
+  transfer comparison on Summer 1 three seed pairs; the discount comparison is
+  one seed, and the search results are n = 1, with no repeats or error bars.
+  The three-arm comparison varies several things at once and two of its arms
+  share an author.
 - **No comparison to prior work.** Linesight, TMRL and GT Sophy are the
   references the design derives from; nothing here is measured against them.
 
@@ -741,15 +774,28 @@ content-hashes, nothing of the game's.
 Pin game version **0.6.2**. Replays, track codes and times are all
 version-sensitive, and the worker throws on a mismatch.
 
-The substrate every result above was produced against, frozen and checked by
-`scripts/verify_baselines.py`:
+The substrate as frozen on 21 October 2026, checked by
+`scripts/verify_baselines.py`. `scripts/substrate_hashes.py` prints the same
+values on any machine. An `.npz` is a zip archive, so it also gets a content
+digest, which ignores how the archive was packed.
 
-| file | sha256 (first 16) |
-|---|---|
-| `polytrack_physics.wasm` | `d4ef02676973d41a` |
-| `geometry.npz` | `6fb32e3b719811dc` |
-| `tracks.npz` | `5cdc6a530cf527c7` |
-| `records.json` | `f87af733f13d7b0f` |
+| file | sha256 | content digest |
+|---|---|---|
+| `polytrack_physics.wasm` | `d4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e` | |
+| `geometry.npz` | `ccbd8f1adf7315cd9ea25c18e41b2264cf9c16ad103be8f1cd64643003cae0e5` | `eda58e383d6d6199529c880d7dbfdcc1568b76889bac74b45cbbe978c00378dc` |
+| `tracks.npz` | `710d3113592b093b87fadd3cda021de90875b5245f63ac145fed6ff714945bcc` | `400311c6ce6dfc5c374de3b46c35af9d905ec4784d9ca5cf8ace4cf38a819dd5` |
+| `records.json` | `8594b39c32fd540e38ab333e289bf9440b432dc8b2c6ecf6502e570418ed1555` | |
+
+The 21 October runs and the ten-lap gate were produced against these files. The
+generalisation and Winter 5 results were produced earlier, on a Windows laptop,
+against files recorded then only as 16-character prefixes; the comment above
+`SUBSTRATE` in `scripts/verify_baselines.py` lists them, and the wasm is the
+same module. The old `records.json` prefix is the eight-lap file as checked out
+with Windows (CRLF) line endings, which `.gitattributes` now prevents.
+`tracks.npz` is what `scripts/build_library.py` builds from `records.json` as it
+stood before the two new laps: rebuilding from `git show 47808ad:records.json`
+reproduces it byte for byte. Built from the current file, Winter 5's entry
+follows the faster 18.809 lap and Winter 4 is added, so both its hashes differ.
 
 **This is the open reproducibility problem.** A benchmark nobody else can run is
 not a benchmark, and the extraction path requires a copy of the game.

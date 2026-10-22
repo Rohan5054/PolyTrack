@@ -199,7 +199,7 @@ milliseconds early. The game implements this check itself — the `Verify` path 
 The client's own worker also verifies our laps directly. `tools/verify_in_client.mjs`
 runs the shipped `simulation_worker.bundle.js` under Node and sends it the
 `Init` and `Verify` messages the game sends itself; `tools/export_verify_payload.py`
-builds the payload. Winter 5's 19025, 19422 and **18786** all PASS. That checks
+builds the payload. Winter 5's 19025, 18809, 19422 and **18786** all PASS. That checks
 `trackcode.py`, `recording.py` and the `wasm.py` call sequence against the game's
 own code -- but **not** the physics, since both sides run the same module. Three
 things cost time getting it running and are worth knowing before you touch it:
@@ -210,10 +210,11 @@ unless the property already exists; and `fromSaveString` wants an editor save
 string, so an exported `.track` has to be inflated, stripped of its header and
 recompressed.
 
-**The gate passes, 8 of 8.** Real runs across Summer 1, Summer 5, Desert 3 and
-Winter 5 — played in the game, read out of its local storage — replay here and
-land on their recorded finish frame to the millisecond, up to a 61,428-tick run.
-Stage 0 is complete.
+**The gate passes, 10 of 10.** Real runs across five tracks -- Summer 1, Summer
+5, Desert 3, Winter 5 and Winter 4 -- played in the game, read out of its local
+storage, replay here and land on their recorded finish frame to the millisecond,
+the longest 61,428 frames. The two newest, Winter 5 18.809 and Winter 4 19.980,
+were played by the author on 21 October 2026. Stage 0 is complete.
 
 An oracle is a recording *paired with the finish frame the real game recorded
 for it*. A recording alone will not do: it ends when the last key is released,
