@@ -285,7 +285,7 @@ polytrack_v5_prod_record_<slot>_default_<trackId>
 
 ```
 python tools/extract_records.py -o records.json
-POLYTRACK_TRACKS=path	o	racks python scripts/run_gate.py records.json
+POLYTRACK_TRACKS=path/to/tracks python scripts/run_gate.py records.json
 ```
 
 Any track, any time — a slow clean lap is a *better* first oracle than a fast
