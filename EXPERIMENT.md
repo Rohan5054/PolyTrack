@@ -48,6 +48,12 @@ All three arms run against identical inputs. Hashes as frozen:
 | `tracks.npz` | `5cdc6a530cf527c7` | 110982 |
 | `records.json` | `f87af733f13d7b0f` | 4378 |
 
+Since 21 October 2026 the frozen substrate is the set of full hashes and content
+digests in `SUBSTRATE` in `scripts/verify_baselines.py`, also listed in the
+README under [Reproducing this](README.md#reproducing-this). The table above is
+what the Winter 5 arms were produced against on the Windows laptop. Rule 4 below
+now means that `scripts/verify_baselines.py` reports the substrate unchanged.
+
 Game version **0.6.2** on every machine. v0.6.0 rewrote the physics; times and
 replays do not cross versions.
 

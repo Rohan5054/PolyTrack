@@ -214,7 +214,8 @@ recompressed.
 5, Desert 3, Winter 5 and Winter 4 -- played in the game, read out of its local
 storage, replay here and land on their recorded finish frame to the millisecond,
 the longest 61,428 frames. The two newest, Winter 5 18.809 and Winter 4 19.980,
-were played by the author on 21 October 2026. Stage 0 is complete.
+were played by the author and added to records.json on 21 October 2026. Stage 0
+is complete.
 
 An oracle is a recording *paired with the finish frame the real game recorded
 for it*. A recording alone will not do: it ends when the last key is released,

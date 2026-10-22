@@ -13,15 +13,16 @@ trained on, beating a scripted baseline on all 16. It finishes none of
 the four human-designed official tracks — see
 [Generalisation](#generalisation-the-result-this-was-built-for).
 
-**Winter 5, 18.786 s** — 23 ms faster than the best human lap (18.809, played by
-the author on 21 October 2026), 239 ms faster than the earlier human reference
-this project was first measured against (19.025), and 636 ms faster than the same
-policy driving without search (19.422). It reproduces its finish frame exactly on
-a fresh backend, and **the game's own simulation worker agrees**.
+**Winter 5, 18.786 s** — 23 ms faster than the best human lap in `records.json`
+(18.809, played by the author and added on 21 October 2026), 239 ms faster than
+the earlier human reference this project was first measured against (19.025),
+and 636 ms faster than the same policy driving without search (19.422). It
+reproduces its finish frame exactly on a fresh backend, and **the game's own
+simulation worker agrees**.
 
 | | Winter 5 | verified by |
 |---|---|---|
-| best human lap (the author, 21 October 2026) | 18.809 | the game's own storage (external oracle) |
+| best human lap in `records.json` (the author's, added 21 October 2026) | 18.809 | the game's own storage (external oracle) |
 | earlier human reference | 19.025 | the game's own storage (external oracle) |
 | Arm 1 — policy alone | 19.422 | gate + client worker |
 | **Arm 2 — policy + guided beam** | **18.786** | gate + client worker |
@@ -91,8 +92,8 @@ It passes on ten real runs across five tracks — Summer 1, Summer 5, Desert 3,
 Winter 5 and Winter 4 — the longest 61,428 frames, each landing on its recorded
 finish frame to the millisecond. Those runs were played in the game and read out
 of its local storage; the two newest, Winter 5 18.809 and Winter 4 19.980, were
-played by the author on 21 October 2026. The game implements the same check
-itself, and `polytrack/verify.py` mirrors its loop.
+played by the author and added to `records.json` on 21 October 2026. The game
+implements the same check itself, and `polytrack/verify.py` mirrors its loop.
 
 ```bash
 python tools/extract_records.py -o records.json
@@ -112,10 +113,12 @@ It needs:
 - `polytrack_physics.wasm` and `geometry.npz` in the repo root, matching the
   hashes in [Reproducing this](#reproducing-this)
   (`POLYTRACK_WASM` / `POLYTRACK_GEOMETRY` can point elsewhere);
-- the game's `.track` files, in the directory `POLYTRACK_TRACKS` names
-  (`game/tracks` above);
+- the game's `.track` files from the 0.6.2 client, in the directory
+  `POLYTRACK_TRACKS` names (`game/tracks` above; any layout, since it searches
+  recursively);
 - Python 3.11 or later, with `numpy` and `wasmtime` (`pip install -e .`
-  installs both).
+  installs both). The table was produced with Python 3.14.4, numpy 2.4.4 and
+  wasmtime 47.0.1. Where there is no `python` on the path, use `python3`.
 
 Do not run `tools/extract_records.py -o records.json` first: it replaces the
 committed laps with the ones in your own game's storage. The command replays all
@@ -199,7 +202,8 @@ look larger — so say so.
 *is* the 19.025 human lap, and `line_weight` charges candidates for distance
 from it. That term found 459 ms in one run where seven runs ranking on arc alone
 had found 14 ms in total. The control sequence is the agent's own and drives
-that route 239 ms faster than the human did — but it found the route with help.
+that route 239 ms faster than the human lap that defines it (19.025) — but it
+found the route with help.
 
 **Arm 3 is not clean-room.** Same author as Arm 2. The data rule held (no Arm 2
 trajectory, coefficient or checkpoint is read) but the insight rule could not:
@@ -650,7 +654,8 @@ Stated plainly, because the result above is easy to over-read:
   scripted driver's time halved, so `best/par` means nothing outside this repo.
 - **The generated distribution is narrow**, and the 0/4 zero-shot row is the
   measurement of what that costs.
-- **The policy alone is slower than the human.** 19.422 against 19.025. Every
+- **The policy alone is slower than both human laps.** 19.422 against 19.025 and
+  18.809. Every
   gain came from search, and the search was steered by a human racing line.
 - **Few seeds.** The generalisation result has three seeds and the 21 October
   transfer comparison on Summer 1 three seed pairs; the discount comparison is
@@ -776,8 +781,10 @@ version-sensitive, and the worker throws on a mismatch.
 
 The substrate as frozen on 21 October 2026, checked by
 `scripts/verify_baselines.py`. `scripts/substrate_hashes.py` prints the same
-values on any machine. An `.npz` is a zip archive, so it also gets a content
-digest, which ignores how the archive was packed.
+digests for the files on whatever machine runs it, for comparison with this
+table. An `.npz` is a zip archive, so it also gets a content digest, which
+ignores how the archive was packed: two machines can write the same arrays to
+files that hash differently.
 
 | file | sha256 | content digest |
 |---|---|---|
@@ -786,16 +793,23 @@ digest, which ignores how the archive was packed.
 | `tracks.npz` | `710d3113592b093b87fadd3cda021de90875b5245f63ac145fed6ff714945bcc` | `400311c6ce6dfc5c374de3b46c35af9d905ec4784d9ca5cf8ace4cf38a819dd5` |
 | `records.json` | `8594b39c32fd540e38ab333e289bf9440b432dc8b2c6ecf6502e570418ed1555` | |
 
-The 21 October runs and the ten-lap gate were produced against these files. The
-generalisation and Winter 5 results were produced earlier, on a Windows laptop,
-against files recorded then only as 16-character prefixes; the comment above
-`SUBSTRATE` in `scripts/verify_baselines.py` lists them, and the wasm is the
-same module. The old `records.json` prefix is the eight-lap file as checked out
-with Windows (CRLF) line endings, which `.gitattributes` now prevents.
-`tracks.npz` is what `scripts/build_library.py` builds from `records.json` as it
-stood before the two new laps: rebuilding from `git show 47808ad:records.json`
-reproduces it byte for byte. Built from the current file, Winter 5's entry
-follows the faster 18.809 lap and Winter 4 is added, so both its hashes differ.
+The 20 and 21 October Summer 1 runs (`arms/transfer`, `arms/separator`) and the
+ten-lap gate were produced against these files. The generalisation and Winter 5
+results were produced earlier, on a Windows laptop, against files recorded then
+only as 16-character prefixes; the comment above `SUBSTRATE` in
+`scripts/verify_baselines.py` lists them, and the wasm is the same module. The
+old `records.json` prefix is the eight-lap file as checked out with Windows
+(CRLF) line endings, which `.gitattributes` now prevents. `tracks.npz` is what
+`scripts/build_library.py` builds from `records.json` as it stood before the two
+new laps. On the M5 that ran the experiments, this rebuilds it byte for byte:
+
+```bash
+mkdir -p runs && git show 47808ad:records.json > runs/records_8lap.json
+POLYTRACK_TRACKS=game/tracks python scripts/build_library.py runs/records_8lap.json -o tracks.npz
+```
+
+Built from the current `records.json`, Winter 5's entry follows the faster
+18.809 lap and Winter 4 is added, so both its hashes differ.
 
 **This is the open reproducibility problem.** A benchmark nobody else can run is
 not a benchmark, and the extraction path requires a copy of the game.
