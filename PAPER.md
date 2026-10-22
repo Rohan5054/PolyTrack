@@ -1,3 +1,5 @@
+> **Superseded by the arXiv preprint (tag `paper-v1`). Numbers in this draft predate 21 October 2026; see `PAPER_OUTLINE.md` for the claims as the evidence now stands.**
+
 # A Frame-Exact Reinforcement Learning Environment from a Shipped Game Binary, with Procedural Track Generation
 
 **Draft. Not submitted anywhere.**
