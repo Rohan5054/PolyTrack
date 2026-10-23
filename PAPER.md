@@ -42,7 +42,7 @@ transfer to none of the game's four official tracks, and we quantify why rather
 than asserting it: measured against the 0.1st–99.9th percentile band of every
 observation feature the policy saw in training, unseen *generated* tracks fall
 inside the band while the official tracks sit **147–154× further outside it**,
-already out of support at the first frame before the car moves. We isolate the
+far outside it, with the gap opening as the attempt proceeds. We isolate the
 obvious confound — that a generated track's reference line is its own
 centreline while an official track's comes from a human lap — by re-driving
 training roads with only the line's provenance swapped, which accounts for at
@@ -462,13 +462,25 @@ two passes of the same measurement; greedy action selection is not
 deterministic under IQN, which resamples its quantile fractions each forward
 pass, so the measurement itself carries roughly ±15 %.
 
-**The observation is out of support at the first frame of all four official
-tracks** — arc 0.0 m, car stationary on the start line, before any action is
-taken. The failure is not a policy driving competently into progressively
-stranger geometry; it is a policy handed inputs unlike anything it trained on
-from the outset. Consistently, the track it got furthest on (23.5 % of the lap)
-is also the least out of distribution, at 1.4–1.7 features per frame against
-7.4–12.5 for the other three.
+**The gap opens during the attempt, not at its first frame.** An earlier
+version of this section claimed the observation was out of support at step 0,
+before the car moved. That is true only in the weakest sense — one feature of
+62, on every track — and the per-frame series show the mass arriving later:
+averaged over the first half of each attempt the count is 7.3 (Winter 5), 10.0
+(Desert 3), 0.2 (Summer 5) and 0.1 (Summer 1), against 14.4, 14.3, 24.5 and 2.8
+over the second half. So on two of the four tracks the observation is already
+far outside support while the car is still driving, and on the other two it
+leaves support as the attempt deteriorates. Figure 5 plots all four against
+elapsed control steps.
+
+That distinction matters for what the measurement licenses. Where the gap opens
+late it is **compatible with the distance being a consequence of failing**
+rather than its cause: a car against a wall produces velocities and ray
+readings unlike anything in training. The magnitude claim is unaffected — 1.4
+to 12.5 features per frame against the control's 0.05 — and so is the ordering
+across tracks: the track the policy got furthest on (Summer 1, 23.5 % of the
+lap) is the least out of distribution at 1.4, against 10.9–12.5 for the other
+three.
 
 **Isolating the reference-line confound.** 95 % of the violations fall on the
 lookahead features, and the lookahead points and lateral offset are measured

@@ -504,7 +504,8 @@ times; and the IQN training loop with parallel collectors.
    **measured rather than asserted**: `scripts/measure_support.py` puts the
    official tracks 147-154x further outside the policy's own observation
    support than unseen generated tracks, which sit inside it, and finds them
-   out of support at step 0 before the car moves. Two things make that number
+   far outside it, the gap opening as the attempt proceeds rather than at
+   its first frame. Two things make that number
    mean something and both are easy to get wrong. The **control** -- unseen
    tracks from the training distribution, scored on the same band -- is what
    rules out a band too tight to be informative. And **95% of the violations

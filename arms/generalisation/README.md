@@ -103,11 +103,24 @@ Ranges are two passes of the same measurement: greedy is not deterministic
 here, IQN resamples its quantile fractions every forward pass, so the
 measurement itself carries about +/-15%. Both passes are in `support/`.
 
-**It is out of distribution at step 0, on all four tracks** -- arc 0.0 m, car
-stationary on the start line, before an action is taken. Not progressively, as
-the car drives into unfamiliar geometry. The one track that got furthest,
-Summer 1 at 23.5% of its lap, is also the least out of distribution at 1.4-1.7
-features per frame against 7.4-12.5 for the other three.
+**The gap opens during the attempt, not at step 0.** This file previously
+claimed the latter; at step 0 the count is 1 of 62 on every track, which is
+noise. Per-attempt halves, from `support/violations_*.csv`:
+
+| track | step 0 | first half | second half | whole |
+|---|---|---|---|---|
+| Winter 5 | 1 | 7.3 | 14.4 | 10.9 |
+| Desert 3 | 1 | 10.0 | 14.3 | 12.1 |
+| Summer 5 | 1 | 0.2 | 24.5 | 12.5 |
+| Summer 1 | 1 | 0.1 | 2.8 | 1.4 |
+| *control, pooled* | | | | *0.05* |
+
+Winter 5 and Desert 3 are far outside support while the car is still driving.
+Summer 5 and Summer 1 leave support as the attempt deteriorates, which is
+**compatible with the distance being a consequence of the failure rather than
+its cause** -- a car against a wall reads unlike anything in training. The
+magnitude and the ordering across tracks both stand: Summer 1, which got
+furthest at 23.5% of its lap, is the least out of distribution.
 
 ## What the measurement cannot see, and what nearly broke it
 

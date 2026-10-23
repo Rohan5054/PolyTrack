@@ -405,10 +405,16 @@ informative, and the official tracks are **147–154× further outside it**. The
 range is two passes — greedy is not deterministic under IQN, so this carries
 about ±15%.
 
-**The observation is out of support at step 0 on all four**, stationary on the
-line before an action is taken. Not a policy driving competently into stranger
-and stranger geometry. The track it got furthest on is also the least out of
-distribution, at 1.4–1.7 features per frame.
+**The gap opens during the attempt, not at its first frame.** This section
+used to say the observation was out of support at step 0; that holds only for
+one feature of 62. Averaged over the first half of each attempt the count is
+7.3 on Winter 5 and 10.0 on Desert 3 but 0.2 and 0.1 on Summer 5 and Summer 1,
+against 14.4, 14.3, 24.5 and 2.8 over the second half — so on two tracks the
+observation is far outside support while the car still drives, and on two it
+leaves as the attempt falls apart, which is compatible with the distance being
+a consequence of failing there rather than its cause. `figures/fig5` plots it.
+The magnitude stands: 1.4–12.5 features per frame against the control's 0.05,
+and the track it got furthest on is the least out of distribution.
 
 **95% of the violations are `lookahead`** — measured against the reference
 line, which a generated track takes from its own centreline and an official

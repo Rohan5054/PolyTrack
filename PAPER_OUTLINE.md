@@ -80,7 +80,8 @@ The zero-shot row stays, and its framing changes — see 6.4.
 Band = 0.1st-99.9th percentile of each of 62 features over 24,545 training
 frames. Control (16 unseen generated tracks, 16/16 finished): **1 %** of frames,
 **0.0-0.1** features outside. Test (4 official, 0/4): **57-62 %**, **7.0-9.2**.
-**147-154x**, out of support at step 0. Two passes, so about ±15 %.
+**147-154x**. Two passes, so about ±15 %. The out-of-support mass arrives
+*during* the attempt, not at its first frame -- see the correction below.
 
 Confound arm: 12 training roads re-driven with only the reference line's
 provenance swapped, 0.03 to 0.77 features per frame, so provenance explains
