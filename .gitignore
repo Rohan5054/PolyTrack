@@ -21,3 +21,6 @@ tracks*.npz
 
 # The client extracted from the game's app.asar: Kodub's content, local only.
 game/
+
+# Built submission bundle, regenerable from main.tex + figures/
+paper-v2.zip
