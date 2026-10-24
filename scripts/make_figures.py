@@ -71,6 +71,75 @@ def save(fig, stem: str) -> None:
     plt.close(fig)
 
 
+def figure_1() -> None:
+    """The architecture, and where each oracle attaches.
+
+    Drawn rather than photographed: the point of the figure is which box each
+    artifact comes from -- the game's own module and its captured geometry on
+    one side, our code on the other -- and where the two validation checks
+    attach, which a screenshot could not show.
+    """
+    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(-0.7, 6.4)
+    ax.axis("off")
+
+    def box(x, y, w, h, text, face, edge="0.3", size=8.5, weight="normal"):
+        ax.add_patch(plt.Rectangle((x, y), w, h, facecolor=face,
+                                   edgecolor=edge, lw=1.1, zorder=2))
+        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center",
+                fontsize=size, zorder=3, weight=weight)
+
+    def arrow(x1, y1, x2, y2, style="-|>", colour="0.35", dashed=False):
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1), zorder=1,
+                    arrowprops=dict(arrowstyle=style, color=colour, lw=1.1,
+                                    linestyle="--" if dashed else "-",
+                                    shrinkA=2, shrinkB=2))
+
+    GAME, OURS, CHECK = "#dfe8f3", "#eef0f2", "#f6e7e2"
+
+    ax.text(2.3, 6.15, "from the shipped client", fontsize=8.5,
+            style="italic", color="0.35", ha="center")
+    box(0.3, 5.1, 4.0, 0.8, "app.asar  (PolyTrack 0.6.2)", GAME, size=9,
+        weight="bold")
+    box(0.3, 4.0, 1.9, 0.8, "physics\n.wasm", GAME)
+    box(2.4, 4.0, 1.9, 0.8, "collision geometry\n(captured)", GAME)
+    arrow(1.25, 5.1, 1.25, 4.8)
+    arrow(3.35, 5.1, 3.35, 4.8)
+
+    ax.text(7.6, 6.15, "track codes", fontsize=8.5, style="italic",
+            color="0.35", ha="center")
+    box(5.6, 5.1, 1.9, 0.8, "official\ntracks", GAME)
+    box(7.7, 5.1, 2.0, 0.8, "generator\n(route by\nconstruction)", OURS, size=7.5)
+
+    box(0.3, 2.6, 4.0, 0.9, "wasmtime host in Python\n(no browser, no IPC)",
+        OURS, size=9, weight="bold")
+    arrow(2.3, 4.0, 2.3, 3.5)
+
+    box(5.6, 2.6, 4.1, 0.9, "PolyTrackEnv\n62-float observation, 9 actions",
+        OURS, size=9, weight="bold")
+    arrow(4.3, 3.05, 5.6, 3.05)
+    arrow(6.55, 5.1, 6.55, 3.5)
+    arrow(8.7, 5.1, 8.7, 3.5)
+
+    box(5.6, 1.2, 4.1, 0.8, "IQN policy  +  guided beam search", OURS, size=9)
+    arrow(7.65, 2.6, 7.65, 2.0)
+    arrow(7.0, 2.0, 7.0, 2.6)
+
+    box(0.3, 1.2, 4.0, 0.8, "acceptance gate\n10 human laps, 5 tracks", CHECK,
+        size=8.5)
+    box(0.3, 0.1, 4.0, 0.8, "the client's own verifier\n(shipped worker, Node)",
+        CHECK, size=8.5)
+    arrow(2.3, 2.6, 2.3, 2.0)
+    arrow(4.3, 1.2, 5.6, 1.6, dashed=True)
+    arrow(5.6, 1.35, 4.3, 0.65, dashed=True)
+
+    ax.text(2.3, -0.42, "both checks execute the same physics module",
+            fontsize=7.5, style="italic", color="0.45", ha="center")
+
+    save(fig, "fig1_architecture")
+
+
 def figure_4() -> None:
     """Held-out finish rate and greedy lap fraction against gradient steps."""
     rows = list(csv.DictReader((GEN / "learning_curve.csv").open()))
@@ -81,10 +150,11 @@ def figure_4() -> None:
     fig, ax = plt.subplots(figsize=(6.4, 3.6))
     ax.plot(steps, greedy, lw=1.2, color="0.55", label="greedy lap fraction")
     ax.plot(steps, finish, lw=1.8, color="C0", label="finish rate")
-    # 257k is the budget claim: 82% by here, roughly flat after.
-    ax.axvline(257, color="C3", lw=1.0, ls="--")
-    ax.annotate("257k: 82%, flat after", xy=(257, 84), xytext=(300, 55),
-                fontsize=8, color="C3",
+    # The dashed line is the three-seed budget the paper recommends, and
+    # the annotation is why: the curve is already flat well before it.
+    ax.axvline(300, color="C3", lw=1.0, ls="--")
+    ax.annotate("300k: the three-seed budget\n(82% already by 257k)",
+                xy=(300, 86), xytext=(380, 52), fontsize=8, color="C3",
                 arrowprops=dict(arrowstyle="->", color="C3", lw=0.8))
     ax.set_xlabel("gradient steps (thousands)")
     ax.set_ylabel("per cent")
@@ -165,15 +235,21 @@ def figure_7() -> None:
             history = json.loads((SEP / run / "history.json").read_text())
             steps = np.array([r["gradient_steps"] for r in history]) / 1000.0
             frac = np.array([r["greedy_fraction"] for r in history]) * 100.0
-            # A 10-row rolling mean: the raw column is one near-greedy
-            # collector's last episodes and is noisy by construction.
-            window = 10
-            smooth = np.convolve(frac, np.ones(window) / window, mode="valid")
-            ax.plot(steps[window - 1:], smooth, lw=1.1, color=colour,
-                    alpha=0.85,
+            # Binned at 10k steps rather than smoothed: the raw column is
+            # one near-greedy collector's recent episodes, so it is noisy by
+            # construction, and a bin keeps the x axis honest about where each
+            # point came from.
+            edges = np.arange(0, 410, 10)
+            mids = (edges[:-1] + edges[1:]) / 2
+            binned = np.array([
+                frac[(steps >= lo) & (steps < hi)].mean()
+                if ((steps >= lo) & (steps < hi)).any() else np.nan
+                for lo, hi in zip(edges[:-1], edges[1:])
+            ])
+            ax.plot(mids, binned, lw=1.1, color=colour, alpha=0.85,
                     label=f"{arm} (3 seeds)" if index == 0 else None)
         for step in first_lap[arm]:
-            ax.plot([step], [2], marker="^", ms=5, color=colour,
+            ax.plot([step], [2], marker="D", ms=4.5, color=colour,
                     clip_on=False)
 
     ax.set_xlabel("gradient steps (thousands)")
@@ -185,13 +261,14 @@ def figure_7() -> None:
     ax.legend(fontsize=8, loc="lower right", frameon=False)
     ax.grid(alpha=0.25, lw=0.5)
     fig.text(0.01, -0.07, "arms/separator/*/history.json, 400k steps, gamma 0.99. "
-             "Triangles mark each run's first completed lap. Curves are a "
-             "10-row rolling mean.", fontsize=6.5, color="0.4")
+             "Diamonds mark each run's first completed lap. Curves are "
+             "binned at 10k steps.", fontsize=6.5, color="0.4")
     save(fig, "fig7_summer1_progress")
 
 
 def main() -> int:
     print(f"\n  writing to {OUT.relative_to(ROOT)}/\n")
+    figure_1()
     figure_4()
     figure_5()
     figure_7()
