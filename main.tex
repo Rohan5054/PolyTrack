@@ -81,9 +81,9 @@ Section~2 places the work among racing agents and benchmarks. Section~3 describe
 
 The strongest racing agents were trained inside real games, and the strongest racing benchmarks are purpose-built simulators; none of either offers a reusable environment whose fidelity to a shipped game has been measured.
 
-\paragraph{Racing RL.} GT Sophy (Wurman et al., 2022) reached superhuman wheel-to-wheel racing in Gran Turismo Sport. Its time-trial predecessor (Fuchs et al., 2021) established the template this work follows most closely: a dense course-progress reward rather than sparse finish time, observations in the car-local frame, and explicit lookahead of upcoming geometry. Vision-based successors (Vasco et al., 2024; Lee et al., 2025) show that pixels are possible but harder, which argues for structured state when the simulator can provide it.
+\paragraph{Racing RL.} GT Sophy (Wurman et al., 2022) reached superhuman wheel-to-wheel racing in Gran Turismo Sport. This work builds on the template set by GT Sophy's time-trial predecessor (Fuchs et al., 2021), and follows it most closely -- employing a dense course-progress reward rather than sparse finish time, observations in the car-local frame, and explicit lookahead of upcoming geometry. Vision-based successors (Vasco et al., 2024; Lee et al., 2025) demonstrate that learning from pixels is possible but more difficult, so it is better to use structured state when the simulator makes it available.
 
-\paragraph{Trackmania.} Linesight (pb4 \& Agade, 2024) is the strongest public agent, using a modified Implicit Quantile Network (IQN) over discrete keyboard inputs with a reference-line reward; in May 2024 it beat ten of twelve world records on the official campaign tracks of Trackmania Nations Forever. TMRL (Bouteiller \& Geze) is the most reusable open framework, using Soft Actor-Critic (SAC) and Randomized Ensembled Double Q-learning (REDQ) over LIDAR-style observations. Both operate the real game, and neither offers a reusable, fidelity-validated environment to third parties, which is the gap this work addresses.
+\paragraph{Trackmania.} Linesight (pb4 \& Agade, 2024) is the strongest public agent, employing a modified Implicit Quantile Network (IQN) for discrete keyboard inputs and a reference-line reward; in May 2024, it set ten of twelve world records on the official campaign tracks of Trackmania Nations Forever. TMRL (Bouteiller \& Geze) is the most reusable open framework, based on Soft Actor-Critic (SAC) and Randomized Ensembled Double Q-learning (REDQ) over LIDAR-style observations. Both run the real game, and neither provides a reusable, fidelity-validated environment to third parties. This work fills that gap.
 
 \paragraph{Racing benchmarks.} Macaluso et al. (2024) provide a Trackmania-inspired Unity environment with a Gymnasium interface (Towers et al., 2024), built for offline RL, and comparable Unity-based racing environments with published baselines exist elsewhere in the offline-RL literature. F1TENTH (O'Kelly et al., 2020) is the main scaled-autonomy benchmark, and its survey (Evans et al., 2024) finds that optimisation-and-tracking pipelines achieve the fastest laps, followed by online planning, ahead of end-to-end learning, a result \S6.3 is consistent with. These are purpose-built simulators, built to resemble a racing game or to model a physical scaled vehicle; none claims frame-exact agreement with a shipped commercial title's own physics, because none runs that title's own code.
 
@@ -108,9 +108,9 @@ The environment runs PolyTrack's own physics and geometry, and reproduces every 
 
 \subsection{Hosting the game's own physics}
 
-PolyTrack moved its physics to WebAssembly in version 0.4.0 and rewrote most of it in C++ in 0.6.0. We load the shipped \texttt{polytrack\_physics.wasm} in Python through the \texttt{wasmtime} runtime. The copy used throughout this paper was extracted from client version 0.6.2, the same version in which all ten acceptance-gate laps were recorded and verified (Table~\ref{tab:gate}); we have not tested whether frame-exactness holds against the module shipped in other 0.6.x releases, and treat that as an open reproducibility risk rather than a settled point (\S9.2). All nine of its imports are ordinary Emscripten hooks, and only heap resizing needs a real implementation, so there is no browser, no Node process and no inter-process communication in the loop.
+PolyTrack moved its physics to WebAssembly in version 0.4.0 and rewrote most of it in C++ in 0.6.0. We load the shipped \texttt{polytrack\_physics.wasm} in Python through the \texttt{wasmtime} runtime. The copy used throughout this paper was extracted from client version 0.6.2, the same version in which all ten acceptance-gate laps were recorded and verified (Table~\ref{tab:gate}); we tested frame-exactness only against that build. The game's author states that all 0.6.x releases should be deterministic (Kodub, personal communication, November 2026), which makes a cross-version discrepancy unlikely, but that is testimony rather than a measurement we made, so we continue to pin 0.6.2 and treat other 0.6.x builds as untested (\S9.2). All nine of its imports are ordinary Emscripten hooks, and only heap resizing needs a real implementation, so there is no browser, no Node process and no inter-process communication in the loop.
 
-One frame is one millisecond. Three independent details in the shipped client confirm it: the simulation worker drains its time accumulator in 0.001~s steps, \texttt{maxFrames} is 5,999,999 (99:59.999 counted in milliseconds), and the time formatter divides frame counts by 60,000 and 1,000. Community notes for an earlier version state 60~Hz and quote the same \texttt{maxFrames} in one sentence; the two cannot both hold.
+One frame is one millisecond. Three independent details in the shipped client confirm it: the simulation worker drains its time accumulator in 0.001~s steps, \texttt{maxFrames} is 5,999,999 (99:59.999 counted in milliseconds), and the time formatter divides frame counts by 60,000 and 1,000. A third-party reverse-engineering note bundled with a reuploaded 0.5.2 client describes the same counter as ``physics frames at 60~Hz'' while quoting that same \texttt{maxFrames} a clause later; at 60~Hz the cap would be 27.8 hours rather than the 99:59.999 the game displays. The note conflates two different rates: the game's author confirms that the physics has always run at 1000~Hz and that 60~Hz describes the render loop (Kodub, personal communication, November 2026). We record this because the conflation is an easy one to inherit --- this project assumed 60~Hz throughout until the hosted backend contradicted it, and every time it had produced until then was wrong by a factor of 16.7.
 
 A thousand decisions a second is not a usable action space, so an agent holds one of nine discrete actions for a control interval of 50~ms. The nine actions are the cross product of three throttle states (accelerate, brake, neither) and three steering states (left, right, neither). The hot path then makes one seven-argument call into the module per simulated millisecond. We call exports through the raw C API rather than the Python wrapper, which boxes every argument: about $4\,\mu$s against $100\,\mu$s for a seven-argument call. At 1000 calls per simulated second that is roughly 4~ms against 100~ms of wrapper overhead per simulated second -- non-trivial, though smaller than the module's own 650--800~ms per simulated second of compute (\S3.6); together the two costs, not the wrapper alone, motivated avoiding it.
 
@@ -122,9 +122,11 @@ As a cross-check we also reimplemented the extraction pipeline in three.js, the 
 
 \subsection{Validation against two complementary oracles}
 
-The two checks below answer different questions and fail in different ways, so we use both, but we avoid calling them ``independent'': both ultimately execute the same compiled, hash-identical physics module, so neither can independently confirm that module's own correctness against the original game. What they do establish, and do not, is stated precisely below. This two-check design -- one external and behavioural, the other internal and code-level -- is a standard differential-testing pattern in software verification rather than a novel method in itself; the contribution here is applying it carefully to a compiled game binary with no public API.
+The two checks below are different and fail differently, so we use both, but we do not use the word ``independent'': both end up running the same compiled, hash-identical code, so neither can independently verify the physics module's own correctness against the original game. What they do and do not establish is stated precisely below.
 
-\paragraph{The acceptance gate (external, behavioural check).} For each personal best the game stores the input recording and the frame on which the run finished. Replaying the recording through our host must land on that frame exactly, not approximately: a simulator 0.01\% off finishes a 40-second run 4~ms early, more than the margins in \S6.3. The game runs the same check on its own replays, and \texttt{polytrack/verify.py} mirrors that loop. A recording alone cannot serve as an oracle, because it ends when the last key is released rather than when the run ends. This check tests whether our hosted module, driven by real recorded human inputs, reproduces the game's recorded outcome; it cannot by itself prove the module is bug-free in states no recorded lap visited (\S7).
+This two-check design -- a standard differential-testing pattern in software verification (one external and behavioural, the other internal and code-level) rather than a novel method in itself -- is applied here carefully to a compiled game binary without any public API.
+
+\paragraph{The acceptance gate (external, behavioural check).} For each personal best, the game stores the input recording and the frame on which the run ended. Replaying the recording through our simulator must land on that frame exactly, not approximately: a simulator 0.01\% off finishes a 40-second run 4~ms early, more than the margins in \S6.3. The game performs the same check on its own replays, and the loop is mirrored in \texttt{polytrack/verify.py}. A recording alone cannot be an oracle, because it is terminated by the release of the last key, not by the end of the run. This check verifies that our hosted module, driven by actual recorded human inputs, generates the game's recorded outcome; it does not guarantee that the module is bug-free in states no recorded lap has visited (\S7).
 
 \begin{table}[h]
 \centering
@@ -151,7 +153,7 @@ Winter 5  & 21,899 & 21,899 & \\
 
 \paragraph{The client's own verifier (internal, code-level check).} The gate validates our host's behaviour against recorded human play, but for a lap our own search produced, the target frame is our own claim rather than a pre-existing record. We therefore run the shipped simulation worker unmodified under Node and send it the initialisation and verification messages the game itself sends. It decodes the track with its own decoder and deserialises the recording with its own codec. It agrees with all four Winter 5 laps we put to it (19.025, 18.809, 19.422 and 18.786).
 
-The verifier exercises our track-code encoder, our recording codec and our call sequence against the game's own code. It does not independently confirm the physics itself, because both sides run the same module, hash-identical; a latent bug in that module would pass both checks. The two checks are complementary in a narrower sense than ``independent oracles'' suggests: the gate says our hosted module reproduces the game's recorded outcomes, and the verifier says we drive and encode for that module the way the game's own client does. Confirming the module's fidelity against ground truth the module itself cannot produce -- e.g.\ against an entirely separate reimplementation, or against telemetry the original game does not expose -- remains outside what either check can do, and we list it as a priority in \S8.3.
+The verifier exercises our track-code encoder, our recording codec and our call sequence against the game's own code. It does not independently confirm the physics itself, because both sides run the same module, hash-identical; a latent bug in that module would pass both checks. The two checks are complementary in a narrower sense than ``independent oracles'' suggests: the gate says our hosted module reproduces the game's recorded outcomes, and the verifier says we drive and encode for that module the way the game's own client does. Validating the module's fidelity against ground truth that the module itself cannot provide (e.g.\ against an entirely separate reimplementation, or against telemetry the original game does not expose) remains outside what either check can do, and we list it as a priority in \S8.3.
 
 \subsection{A small geometry error with a large consequence}
 
@@ -202,15 +204,15 @@ The generator lays out self-avoiding walks on the game's grid, placing a start, 
 
 \subsection{Two findings from building it}
 
-\paragraph{Part orientation is not what the start transform implies.} The transform that places the car composes the part's rotation with a half turn about the vertical axis, but parts themselves are placed without it. A straight piece is symmetric under a half turn, so every check built from straight-only tracks passed under the wrong model, including full drives to the finish. Only corners expose it: we built one corner at all four rotations and drove each, and exactly the two the corrected model predicts were drivable.
+\paragraph{The start transform does not imply part orientation.} The transform that places the car composes the part's rotation with a half turn about the vertical axis, but parts themselves are placed without it. A straight piece is symmetric under a half turn, so every check built from straight-only tracks passed under the wrong model, including full drives to the finish. Only corners expose it: we built one corner at all four rotations and drove each, and exactly the two the corrected model predicts were drivable.
 
-\paragraph{A check can measure the wrong thing and look like proof.} An adjacency test reported zero broken connections on a track no car could drive. It measured how far each piece's geometry reached toward its neighbour, and a barrier reaches a boundary exactly as well as an opening does. Its replacement keeps only upward-facing surfaces and asks where road actually exists.
+\paragraph{A check can measure the wrong thing and appear to be proof.} An adjacency test reported zero broken connections on a track no car could drive. It measured how far each piece's geometry reached toward its neighbour, and a barrier reaches a boundary exactly as well as an opening does. Its replacement keeps only upward-facing surfaces and asks where road actually exists.
 
 \subsection{Its narrowness}
 
-The vocabulary is narrow, and we state that rather than defend it. The generator uses five of the game's 186 part types (a start, a straight, one right-angle corner, a checkpoint and a finish) on flat ground, with no jumps, banking, elevation or walls, and at least one straight between corners by default. Two same-handed corners in succession form a $180^\circ$ hairpin inside 40~m that the scripted driver cannot take.
+The vocabulary is narrow, which we state upfront rather than defend. The generator uses five of the game's 186 part types (a start, a straight, one right-angle corner, a checkpoint, and a finish), all set on flat ground with no jumps, banking, elevation, or walls, and with at least one straight segment between corners by default. Two consecutive same-handed corners form a $180^\circ$ hairpin within a 40~m span that the scripted driver cannot navigate.
 
-Generated tracks are drivable, which says the geometry is sound, not that they are interesting to race. Section~6.2 measures what the narrowness costs, and \S6.4 is the evidence that the cost is a limit of the generator rather than of learning.
+The fact that generated tracks are drivable demonstrates that the underlying geometry is sound, though it does not imply they are compelling to race. Section~6.2 measures what the narrowness costs, and \S6.4 is the evidence that the cost is a limit of the generator rather than of learning.
 
 \section{Agent and search}
 
@@ -244,11 +246,11 @@ Control & One action held for 50~ms; a failed episode is cut after 3~s with unde
 
 \subsection{The discount every banked run used}
 
-Every banked result was trained at $\gamma = 0.99$, a discount the code argues against. The agent's configuration defaults to 0.999, with a comment that 0.99 is a five-second horizon at a 50~ms control interval, too short to value the far side of a track. The training script's own \texttt{-{}-gamma} flag defaulted to 0.99 and always overrode it. We fixed this on 21 October 2026: the flag now defers to the configuration, and the collectors take their $n$-step discount from the agent's configuration, with a test.
+All the banked results were trained at $\gamma = 0.99$, a discount that the code itself argues against. The agent's configuration defaults to 0.999, and there is a comment that 0.99 is a five-second horizon at a 50~ms control interval, too short to value the far side of a track. The training script's \texttt{-{}-gamma} flag defaulted to 0.99, and it always overrode the configuration. This was corrected on 21 October 2026: the flag now defers to the configuration, and the collectors take their $n$-step discount from the agent's configuration, with a test.
 
-The comparison below was run after that fix, with the \texttt{-{}-gamma} flag removed entirely rather than merely overridden, so the two arms differ only in the discount passed to the agent's configuration and not in which code path produced them.
+The comparison below was performed after that fix, and the \texttt{-{}-gamma} flag was removed completely, not just overridden, meaning that the two arms differ only in the discount passed to the agent's configuration and not in which code path produced them.
 
-The longer horizon did not help. On Summer 1, trained from scratch with seed 1, budget and everything else held fixed:
+The longer horizon did not help. On Summer 1, trained from scratch with seed 1, budget and other factors being equal:
 
 \begin{table}[h]
 \centering
@@ -265,7 +267,7 @@ Greedy laps completed, of 10 & 10 & 0 \\
 \label{tab:gammacompare}
 \end{table}
 
-This is one seed. It licenses the statement that 0.99 did not handicap the banked results and nothing more, so we did not retrain \S6.1.
+This is one seed. It licenses the statement that $\gamma = 0.99$ did not handicap the banked results and nothing more, so we did not retrain \S6.1.
 
 \subsection{Policy-guided search}
 
@@ -277,9 +279,9 @@ Candidates are scored on progress at equal depth, never on shaped reward. Every 
 
 Our first reward charged a per-second time penalty and forfeited part of the un-driven lap on failure. Twelve minutes of training broke it: with the episode over, a failure costs a fixed amount whenever it arrives, while staying alive keeps paying the clock, so the fastest possible failure wins. The agent learned to drive sideways off the start line; the failure histogram moved from 74\% stalled to 88\% off-track while mean return improved and progress fell to zero.
 
-The obvious repair, charging the full time budget on failure, inverts the exploit rather than removing it. Discounting shrinks any large terminal penalty, so stalling before failing beats failing at once, and the agent learns to sit still.
+The obvious repair (charging the full time budget on failure) inverts the exploit rather than removing it. Discounting reduces any large terminal penalty, so it is better to stall than to fail at once, and the agent learns to sit still.
 
-With every reward term non-negative, a terminal state is worth zero and continuing is worth at least zero, so quitting is never strictly better for any policy, any discount, anywhere on the track. Time pressure then comes from a finish bonus scaled by par over elapsed time. We state the design rule plainly: a negative step reward makes ending the episode attractive; a large terminal penalty makes delaying it attractive. The hazard is known in general, but we have not seen it stated in this form for racing, where it is sharp because failure is always one steering input away.
+If all the reward terms are non-negative, then the value of a terminal state is zero and the value of continuing is at least zero, so it is never strictly better to quit, for any policy, any discount, or anywhere on the track. Time pressure then comes from a finish bonus scaled by par over elapsed time. We state the design rule clearly: a negative step reward makes episode termination desirable, while a large terminal penalty makes putting it off desirable. The hazard is generally known, but we have not seen it stated in this form for racing, where it is sharp because failure is always one steering input away.
 
 \section{Results}
 
@@ -485,7 +487,7 @@ It also changes the label on an earlier experiment. On 20 October we ran the tra
 
 \subsection{Does the representation transfer?}
 
-We compared three seed pairs on Summer 1 at 400,000 gradient steps and $\gamma = 0.99$. The pretrained arm starts from the generalisation checkpoint's online weights in both networks, with a fresh optimiser and the step counter at zero; the scratch arm starts from random weights. Arms alternated one pair at a time, and the scratch seed-1 run is the $\gamma = 0.99$ run of \S5.2.
+Three pairs of seeds were compared on Summer 1 at 400,000 gradient steps and $\gamma = 0.99$. The pretrained arm begins from the online weights of the generalisation checkpoint in both networks, with a new optimiser and the step counter at zero, while the scratch arm begins with random weights. The arms were alternated one pair at a time, with the $\gamma = 0.99$ run of \S5.2 serving as the scratch seed-1 run.
 
 \begin{table}[h]
 \centering
@@ -507,12 +509,13 @@ Best lap & 24.652 / 28.010 / 25.092~s & 26.084 / 24.292 / 24.833~s \\
 \end{table}
 
 \begin{itemize}[leftmargin=*]
-\item The primary metric goes against transfer. The pretrained arm reached its first lap later in all three pairs.
-\item Mid-run progress goes the other way in all three pairs, and the pretrained runs' finished-episode counts are far more consistent across seeds (157--166 against 16--427).
-\item The end is a draw: 14 of 30 greedy laps for the pretrained arm against 12 of 30.
+\item The primary metric goes against transfer: across all three pairs, the pretrained arm finished its first lap later in the run.
+\item Mid-run progress moves in the opposite direction for all three pairs.
+\item Finished-episode counts are much more uniform among the pretrained seeds (157--166 compared to 16--427).
+\item The final performance ends in a draw, with 14 of 30 greedy laps going to the pretrained arm and 12 of 30 to the scratch arm.
 \end{itemize}
 
-Three pairs pointing the same way is not significance: a two-sided sign test gives $p = 0.25$, so we report direction and spread rather than a significance claim. ``First lap'' also counts any collector, including the one exploring at a rate of 0.4, so it is noisy by construction; the greedy rows are the cleaner measure of what a policy can do. Figure~\ref{fig:transfercurve} shows the share of the lap reached over training for all six runs.
+Three pairs pointing in the same direction does not establish statistical significance (a two-sided sign test yields $p = 0.25$), so we report the direction and spread instead of making a significance claim. The ``first lap'' metric counts first laps by any collector, including the one exploring at a rate of 0.4, making it noisy by construction; the greedy rows provide a more accurate indicator of policy performance. Figure~\ref{fig:transfercurve} displays the share of the lap reached during training across all six runs.
 
 \begin{figure}[htbp]
     \centering
@@ -521,26 +524,26 @@ Three pairs pointing the same way is not significance: a two-sided sign test giv
     \label{fig:transfercurve}
 \end{figure}
 
-One reading fits all of it, and we label it as a reading: what transfers is general driving on the parts of a track the generator resembles, and what does not transfer is the part that decides whether a lap completes. The per-section failure split of \S6.2 is consistent with this reading; it is not a test of it.
+One interpretation fits the complete set of results, and we frame it accordingly: what transfers is general driving on sections of a track that resemble the generator's distribution, whereas what fails to transfer is the section that decides whether a lap completes. The per-section failure split of \S6.2 is consistent with this interpretation, but it is not a direct test of it.
 
 \section{What this does not show}
 
-The results above are easy to over-read, so we state their limits directly.
+The results above are easily misinterpreted, so we explicitly state their limits.
 
 \begin{itemize}[leftmargin=*]
-\item \textbf{Three seeds, one configuration.} \S6.1 repeats the training run three times, which gives a spread on the headline figure. It does not vary anything else (one architecture, one reward, one set of hyperparameters), so nothing here is an ablation.
-\item \textbf{The single-track search results are $n=1$}, and selected from a much larger pool of logged search attempts (\S6.3); it was not repeated under a fixed, pre-registered configuration.
-\item \textbf{The discount comparison is one seed.} \S5.2 licenses only the statement that $\gamma = 0.99$ did not handicap the banked results.
-\item \textbf{The transfer result is mixed, not null, and it is three seeds.} The primary metric and mid-run progress point in opposite directions, and neither is significant at $n=3$.
-\item \textbf{The support measurement is descriptive, not causal, and marginal, not joint.} \S6.2 establishes that the official-track observation lies far outside the per-feature training band and that reference-line provenance does not explain it. It does not show that this distance causes the failure, and it can understate distance driven by correlated shifts across features rather than any single one (\S8.4). The experiment that would settle causality is a wider generator, where the measured distance should fall and performance should follow (\S8.1).
-\item \textbf{The per-section failure localisation is post-hoc.} The sections of Summer 1 were read off the reference line's height profile after the runs.
-\item 12 of the 62 observation features cannot register a violation, being bounded and saturated in training, so every distance in \S6.2 is a lower bound.
-\item \textbf{No learned baseline.} The scripted driver is a floor, not a competitor. Nothing here is measured against Linesight, TMRL, GT Sophy, or a standard algorithm such as PPO or DQN on a common task.
-\item \textbf{Par is a convention, not a standard.} On generated tracks it is the scripted driver's time halved, so best/par compares runs within this paper and means nothing outside it.
-\item \textbf{The generated distribution is narrow:} five part types on flat ground. \S6.1's zero-shot row measures what that costs, and \S6.2 quantifies it. Generalisation claims in this paper (C3) should be read as generalisation within that narrow distribution, not to PolyTrack tracks in general.
-\item The approaches compared on Winter 5 differ along several axes at once and are not a controlled comparison; two share an author, and the third was informed by the second's findings.
-\item \textbf{The policy alone does not beat a human on Winter 5.} It is 397~ms slower than the 19.025 lap and 613~ms slower than the 18.809 lap; only policy plus search is faster. On Summer 1, trained on that track, it laps within 2.0\% of the best human time. That is a different statement from the Winter 5 one and should not be conflated with it.
-\item \textbf{The environment is validated on five tracks}, against two checks that share the same underlying physics module (\S3.3). Ten runs is a strong gate but a small corpus, and neither check independently confirms the module's fidelity to the original game in states no recorded lap visited.
+\item \textbf{Three seeds, one configuration.} The training run is repeated three times, yielding a spread on the \S6.1 headline figure. It does not vary anything else (one architecture, one reward, one set of hyperparameters), so this is not an ablation.
+\item \textbf{The single-track search results are $n=1$}, and selected from a much larger pool of logged search attempts (\S6.3). They were not repeated under a fixed, pre-registered configuration.
+\item \textbf{The discount comparison is one seed;} \S5.2 only licenses the statement that $\gamma = 0.99$ did not disadvantage the banked results.
+\item \textbf{The transfer result is mixed, not null, and based on three seeds.} The primary metric and mid-run progress point in opposite directions, and neither is significant at $n=3$.
+\item \textbf{The support measurement is descriptive, not causal, and marginal, not joint.} \S6.2 establishes that the official-track observation lies well outside the per-feature training band, and that reference-line provenance does not explain this. It does not show that this distance causes the failure, and it can understate distributional distance driven by correlated shifts across features rather than any single one (\S8.4). The experiment that would determine causality is a wider generator, where the measured distance should fall and performance should follow (\S8.1).
+\item \textbf{The per-section failure localisation is post-hoc.} The sections of Summer 1 were read off the height profile of the reference line after the runs.
+\item 12 of the 62 observation features are bounded and saturated in training, so they cannot register a violation, and every distance in \S6.2 is therefore a lower bound.
+\item \textbf{No learned baseline.} The scripted driver is not a competitor. No measurement is taken here against Linesight, TMRL, GT Sophy, or a standard algorithm like PPO or DQN on a common task.
+\item \textbf{Par is a convention, not a standard.} On generated tracks it is the scripted driver's time halved, so best/par is only meaningful within this paper, not outside it.
+\item \textbf{The generated distribution is narrow:} five part types on flat ground. \S6.1's zero-shot row measures what that costs, and \S6.2 quantifies it. Generalisation claims in this paper (C3) should be interpreted as generalisation within that narrow distribution, not as generalisation to PolyTrack tracks in general.
+\item The methods compared on Winter 5 vary along multiple dimensions and are not a controlled comparison; two share an author, and the third was based on the second's results.
+\item \textbf{The policy alone does not beat a human on Winter 5.} It is 397~ms slower than the 19.025 reference and 613~ms slower than the 18.809 lap; only policy plus search is faster. On Summer 1, having been trained on that track, it laps within 2.0\% of the best human time. That is a different statement from the Winter 5 one and should not be confused with it.
+\item \textbf{The environment is validated on five tracks}, against two checks that share the same underlying physics module (\S3.3). Ten runs make a strong gate but a small corpus, and neither check independently verifies the module's fidelity to the original game in states not visited by any recorded lap.
 \end{itemize}
 
 \section{Experiments still required}
@@ -549,9 +552,9 @@ The transfer experiment has run and the budget question is settled. One remainin
 
 \subsection{Widen the generated distribution}
 
-The generator uses five of 186 part types on flat ground, while the official tracks need jumps, banking, elevation and wall-rides. Each addition is a fresh geometry problem of the kind \S4.1 describes, and elevation in particular turns the self-avoiding walk from a two-dimensional problem into a three-dimensional one.
+The generator uses only five of the game's 186 part types, on flat ground, whereas the official tracks require jumps, banking, elevation and wall-rides. Every addition is a new geometry problem of the type \S4.1 describes, and in particular, elevation turns the self-avoiding walk from a two-dimensional problem into a three-dimensional one.
 
-\S6.2 makes this both targeted and falsifiable. It names the features furthest outside the training band that no confound explains (vertical velocity at $4.4\times$ and angular velocity about a horizontal axis at $10\times$), so elevation and banking come first, and the failure localisation names the Summer 1 valley floor as the first place to look. It also supplies an intermediate measurement: adding a part family should reduce the measured distance on the official tracks, which can be read off before any policy is trained to convergence. If the distance falls and zero-shot performance does not follow, the mechanism claimed in \S6.2 is wrong, and that is the outcome worth being able to detect.
+\S6.2 makes this targeted and falsifiable. It identifies the features furthest from the training band that no confound explains (vertical velocity at $4.4\times$ and angular velocity about a horizontal axis at $10\times$), so elevation and banking come first, and the failure localisation names the Summer 1 valley floor as the first place to look. It also provides an intermediate measurement: adding a part family should shorten the measured distance on the official tracks, which can be read off prior to any policy being trained to convergence. If the distance drops and zero-shot performance does not follow, the mechanism in \S6.2 is incorrect, and that is the result worth being able to identify.
 
 \subsection{Seeds and variance}
 
@@ -559,9 +562,9 @@ The generator uses five of 186 part types on flat ground, while the official tra
 
 \subsection{Baselines and a stronger validation oracle}
 
-At minimum, one standard algorithm besides IQN, such as PPO or DQN, on the generated tracks and one official track. A comparison against Linesight's method on a common track would be stronger still. The scripted pure-pursuit driver (\S4) remains the floor.
+At least one standard algorithm other than IQN, such as PPO or DQN, should be run on the generated tracks and one official track. A comparison with Linesight's method on a common track would be stronger still. The scripted pure-pursuit driver (\S4) is still the bottom baseline.
 
-On the validation side, the gate and the client verifier (\S3.3) both execute the same physics module and so cannot independently confirm that module's correctness against the original game in states no recorded lap visited. A genuinely independent check -- for example, telemetry captured directly from the running browser client on inputs never recorded as a personal best, compared frame-by-frame against our hosted module on the same inputs -- would close this gap and is a priority for future work.
+On the validation side, the gate and the client verifier (\S3.3) both execute the same physics module, so neither can prove the module's correctness against the original game in states with no recorded lap. A truly independent check (such as telemetry captured from the running browser client on inputs never recorded as a personal best, compared frame-by-frame against our hosted module on the same inputs) would close this gap and is a priority for future work.
 
 \subsection{Ablations}
 
@@ -601,11 +604,13 @@ Two caveats apply to reproducing \S6 exactly. Greedy evaluation is not determini
 
 \subsection{What cannot currently be released, and why it matters}
 
-The environment depends on the game's compiled physics module and on collision geometry derived from it, and neither is ours to redistribute. A benchmark nobody else can run is not a benchmark, so we state this as an unresolved limitation rather than a detail.
+The environment relies on the game's compiled physics module and on the collision geometry derived from it, and neither is ours to share. A benchmark that no one else can run is not a benchmark, so we do not call this a detail, but an unresolved limitation.
 
-The game's author has confirmed that using the physics module directly is acceptable under the game's terms, and asked that the tooling not permit cheating and not submit runs to the leaderboard. The released code meets both conditions by construction: the replay viewer serves the client on a throwaway local origin and blocks requests to the game's servers at two levels. Redistribution has not been granted and is not addressed by the terms, so reproduction currently requires a copy of the game and an extraction step, a weaker story than a benchmark venue expects. Permission would turn a described environment into one others can run.
+The game's creator has stated that it is acceptable to use the physics module directly under the game's terms, and requested that the tooling not allow cheating and not submit runs to the leaderboard. By construction, the released code satisfies both conditions: the replay viewer serves the client on a throwaway local origin and blocks requests to the game's servers at two levels.
 
-PolyTrack is also a live, periodically updated browser game, not a frozen research artifact: a future patch could change the physics module, its WebAssembly export signature, or the geometry formats \S3.2 depends on, which would break frame-exactness silently rather than loudly. Pinning the exact module and asset hashes used in this paper (\S9.1) makes such a break detectable after the fact, but we have no mechanism to guarantee reproducibility of the results in this paper against a version of the game released after it.
+Redistribution has not been granted and is not covered by the terms, so reproduction currently requires a copy of the game and an extraction step, a weaker story than a benchmark venue expects. Official permission would make the described environment one that others can run.
+
+PolyTrack is not a frozen research artifact; it is a live, periodically updated browser game. A future patch could change the physics module, its WebAssembly export signature, or the geometry formats \S3.2 relies on, and would break frame-exactness silently rather than loudly. Pinning the exact module and asset hashes used in this paper (\S9.1) makes such a break detectable after the fact, but we have no mechanism to guarantee reproducibility of the results in this paper against a version of the game released after it.
 
 \subsection{Ethics and attribution}
 
@@ -623,9 +628,9 @@ Both effects change how many transitions and gradient steps an hour buys, and th
 
 \section{Conclusion}
 
-We set out to build a reinforcement-learning environment that is faithful to a shipped commercial game rather than a reimplementation of it, and to show that such an environment supports real research questions. Table~\ref{tab:claims} summarised five claims; here we revisit them in light of the results.
+We set out to create a reinforcement-learning environment that is faithful to a shipped commercial game rather than a reimplementation of it, and to show that such an environment can support real game-research questions. Table~\ref{tab:claims} summarised five claims; here we revisit them in light of the results.
 
-C1 is supported at the strength we can currently claim: ten of ten human laps reproduce their recorded finish frame exactly, and the game's own verifier agrees with every banked lap we produced. These are two complementary checks rather than fully independent oracles, since both execute the same physics module (\S3.3), and neither can independently confirm that module's fidelity to the original game in states no recorded lap visited (\S8.3). This is the paper's central contribution, and it generalises only as far as the five tracks and ten laps we have validated against, and the single game version tested (\S7, \S3.1). C2 is supported in the same sense: the generator's tracks are drivable by construction and need no human lap, though the vocabulary of part types it draws on remains narrow (\S4.2, \S8.1). C3, read as the two separate experiments it actually is (\S6.1), shows strong within-distribution generalisation on one metric (97.9$\pm$0.6\% of held-out attempts finished, three seeds) and no measurable train/held-out gap on another (94\% against 92\%, a single longer run), both confined to the generator's own narrow distribution rather than PolyTrack tracks in general; neither experiment alone supports both halves of the claim as originally stated, and we have revised the abstract and claims table accordingly. C4's localisation of the generalisation failure to observation-space distance is supported by a control arm and a confound arm, but remains correlational and based on a marginal, per-feature distance measure, rather than causal or joint, until the generator is widened (\S8.1) and the prediction made there is tested. C5 stands at $n=1$, with a 23~ms margin obtained after extensive search-configuration exploration and with the winning route steered by a human racing line; we regard it as suggestive rather than established.
+C1 is supported at the full strength that we can currently claim: ten of ten human laps reproduce their recorded finish frame exactly, and the game's own verifier agreed with all of our banked laps. These are two complementary checks rather than fully independent oracles, as both execute the same physics module (\S3.3), and neither can independently verify the fidelity of this module to the original game in states no recorded lap visited (\S8.3). This is the main contribution of this paper, and it only generalises as far as the five tracks and ten laps we have validated it against, along with the single game version tested (\S7, \S3.1). C2 is supported in the same way: the tracks generated are drivable by construction and do not require a human lap, but the vocabulary of part types the generator draws from remains narrow (\S4.2, \S8.1). C3, read as the two separate experiments it actually is (\S6.1), shows strong within-distribution generalisation on one metric (97.9$\pm$0.6\% of held-out attempts finished, three seeds) and no measurable train/held-out gap on another (94\% against 92\%, a single longer run), both confined to the generator's own narrow distribution rather than PolyTrack tracks in general; neither experiment alone supports both halves of the claim as originally stated, and we have revised the abstract and claims table accordingly. C4's localisation of the generalisation failure to observation-space distance is supported by a control arm and a confound arm, but remains correlational and based on a marginal, per-feature distance measure, rather than causal or joint, until the generator is widened (\S8.1) and the prediction made there is tested. C5 stands at $n=1$, with a 23~ms margin obtained after extensive search-configuration exploration and with the winning route steered by a human racing line; we regard it as suggestive rather than established.
 
 Read together, the results support hosting a shipped game's own physics as a viable, falsifiable way to build a racing RL environment, and they identify where the resulting environment's generated-track distribution still falls short of official human-designed content. The most consequential open question is whether widening the generator (\S8.1) closes that gap, which would convert C4 from a correlation into a tested causal claim; the most consequential open engineering question is whether an independent, non-shared oracle can be constructed to validate the physics module itself (\S8.3).
 
